@@ -1385,27 +1385,13 @@ public class GameManager {
         inventory.clear();
 
         ItemStack sword = new ItemStack(Material.NETHERITE_SWORD);
-        var swordMeta = sword.getItemMeta();
-        if (swordMeta != null) {
-            Enchantment sharpness = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("sharpness"));
-            if (sharpness != null) {
-                swordMeta.addEnchant(sharpness, 3, true);
-            }
-            sword.setItemMeta(swordMeta);
-        }
-        beast.getInventory().setHeldItemSlot(0);
         inventory.setItem(0, sword);
-
-        ItemStack bow = createEnchantedBow();
-        inventory.setItem(1, bow);
+        beast.getInventory().setHeldItemSlot(0);
 
         ItemStack potion = createHealingPotion();
+        inventory.setItem(1, potion.clone());
         inventory.setItem(2, potion.clone());
         inventory.setItem(3, potion.clone());
-        inventory.setItem(4, potion.clone());
-
-        ItemStack arrow = new ItemStack(Material.ARROW, 1);
-        inventory.setItem(17, arrow);
 
         inventory.setHelmet(new ItemStack(Material.DIAMOND_HELMET));
         inventory.setChestplate(new ItemStack(Material.DIAMOND_CHESTPLATE));
@@ -1437,7 +1423,7 @@ public class GameManager {
         return potion;
     }
 
-    private ItemStack createEnchantedBow() {
+    private ItemStack createEnchantedBow(int powerLevel) {
         ItemStack bow = new ItemStack(Material.BOW);
         var bowMeta = bow.getItemMeta();
         if (bowMeta != null) {
@@ -1447,7 +1433,7 @@ public class GameManager {
                 bowMeta.addEnchant(infinity, 1, true);
             }
             if (power != null) {
-                bowMeta.addEnchant(power, 2, true);
+                bowMeta.addEnchant(power, Math.max(1, powerLevel), true);
             }
             bow.setItemMeta(bowMeta);
         }
@@ -1479,15 +1465,23 @@ public class GameManager {
         PlayerInventory inventory = runner.getInventory();
 
         ItemStack sword = new ItemStack(Material.NETHERITE_SWORD);
+        var swordMeta = sword.getItemMeta();
+        if (swordMeta != null) {
+            Enchantment sharpness = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("sharpness"));
+            if (sharpness != null) {
+                swordMeta.addEnchant(sharpness, 3, true);
+            }
+            sword.setItemMeta(swordMeta);
+        }
         inventory.setItemInMainHand(sword);
 
-        ItemStack bow = createEnchantedBow();
-        inventory.setItem(1, bow);
+    ItemStack bow = createEnchantedBow(1);
+    inventory.setItem(1, bow);
 
         ItemStack potion = createHealingPotion();
-        inventory.setItem(2, potion.clone());
-        inventory.setItem(3, potion.clone());
-        inventory.setItem(4, potion.clone());
+        for (int slot = 2; slot <= 6; slot++) {
+            inventory.setItem(slot, potion.clone());
+        }
 
         ItemStack arrow = new ItemStack(Material.ARROW, 1);
         inventory.setItem(17, arrow);
@@ -1495,7 +1489,17 @@ public class GameManager {
         inventory.setHelmet(new ItemStack(Material.NETHERITE_HELMET));
         inventory.setChestplate(new ItemStack(Material.NETHERITE_CHESTPLATE));
         inventory.setLeggings(new ItemStack(Material.NETHERITE_LEGGINGS));
-        inventory.setBoots(new ItemStack(Material.NETHERITE_BOOTS));
+        ItemStack boots = new ItemStack(Material.NETHERITE_BOOTS);
+        var bootsMeta = boots.getItemMeta();
+        if (bootsMeta != null) {
+            Enchantment featherFalling = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("feather_falling"));
+            if (featherFalling != null) {
+                bootsMeta.addEnchant(featherFalling, 4, true);
+            }
+            bootsMeta.setUnbreakable(true);
+            boots.setItemMeta(bootsMeta);
+        }
+        inventory.setBoots(boots);
 
         PotionEffect speedBoost = new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 1, false, false, true);
     runner.removePotionEffect(PotionEffectType.SPEED);
