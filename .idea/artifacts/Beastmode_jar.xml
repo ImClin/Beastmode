@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" build-on-make="true" name="Beastmode:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/Beastmode_jar</output-path>
+    <root id="archive" name="Beastmode.jar">
+      <element id="module-output" name="Beastmode.main" />
+    </root>
+  </artifact>
+</component>

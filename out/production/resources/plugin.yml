@@ -1,0 +1,14 @@
+name: Beastmode
+version: '1.0-SNAPSHOT'
+main: com.colin.beastmode.Beastmode
+api-version: '1.21'
+commands:
+	beastmode:
+		description: Manage Beastmode arenas and setup
+		usage: /beastmode
+		aliases: [bm]
+		permission: beastmode.command
+permissions:
+	beastmode.command:
+		description: Allows access to Beastmode commands
+		default: op
