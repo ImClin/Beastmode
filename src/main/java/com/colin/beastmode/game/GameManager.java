@@ -221,27 +221,87 @@ public class GameManager {
     }
 
     private void completeRunnerVictory(String key, ActiveArena activeArena, Player finisher) {
-        activeArena.setMatchActive(false);
+        if (activeArena == null) {
+            return;
+        }
+
         List<Player> participants = collectParticipants(activeArena);
+        if (participants.isEmpty()) {
+            cleanupArena(key, activeArena);
+            return;
+        }
+
+        UUID beastId = activeArena.getBeastId();
         if (finisher != null && finisher.isOnline() && !participants.contains(finisher)) {
             participants.add(finisher);
         }
 
-        String finisherName = finisher != null ? finisher.getName() : "Runner";
+        if (finisher != null) {
+            if (activeArena.isFinalPhase()) {
+                return;
+            }
+
+            activeArena.setFinalPhase(true);
+
+            String finisherName = finisher.getName();
+            String title = ChatColor.GOLD + "" + ChatColor.BOLD + "Parkour Complete!";
+            String subtitle = ChatColor.AQUA + finisherName + ChatColor.YELLOW + " finished the parkour and is ready to slay the Beast!";
+
+            List<UUID> toRemove = new ArrayList<>();
+            for (Player participant : participants) {
+                boolean isFinisher = participant.getUniqueId().equals(finisher.getUniqueId());
+                boolean isBeast = beastId != null && beastId.equals(participant.getUniqueId());
+
+                participant.sendTitle(title, subtitle, 10, 60, 10);
+                participant.playSound(participant.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+
+                if (isFinisher) {
+                    send(participant, ChatColor.GOLD + "" + ChatColor.BOLD + finisherName + ChatColor.RESET
+                            + ChatColor.YELLOW + " finished the parkour and is ready to slay the Beast!");
+                    scheduleRunnerReward(participant);
+                    continue;
+                }
+
+                if (isBeast) {
+                    send(participant, ChatColor.DARK_RED + "" + ChatColor.BOLD + finisherName
+                            + ChatColor.RED + " raided the weapon cache! Stop them before they strike back.");
+                    continue;
+                }
+
+                send(participant, ChatColor.YELLOW + "You have been removed from the arena while "
+                        + ChatColor.AQUA + finisherName + ChatColor.YELLOW + " prepares to fight the Beast.");
+                participant.removePotionEffect(PotionEffectType.SPEED);
+                resetPlayerLoadout(participant);
+                sendPlayerToSpawn(activeArena, participant);
+                toRemove.add(participant.getUniqueId());
+            }
+
+            for (UUID uuid : toRemove) {
+                activeArena.removePlayer(uuid);
+            }
+            return;
+        }
+
+        boolean finalPhase = activeArena.isFinalPhase();
+        activeArena.setMatchActive(false);
+
         String title = ChatColor.GREEN + "" + ChatColor.BOLD + "Runner Victory!";
-        String subtitle = ChatColor.AQUA + finisherName + ChatColor.GREEN + " escaped!";
+        String subtitle = finalPhase
+                ? ChatColor.AQUA + "The Beast has been defeated."
+                : ChatColor.AQUA + "The Beast never made it out.";
 
         for (Player participant : participants) {
-            boolean isFinisher = finisher != null && participant.getUniqueId().equals(finisher.getUniqueId());
+            boolean isRunner = activeArena.isRunner(participant.getUniqueId());
             participant.sendTitle(title, subtitle, 10, 60, 10);
             participant.playSound(participant.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
-            send(participant, ChatColor.GREEN + "" + ChatColor.BOLD + "Runner won the 1v1! "
-                    + ChatColor.RESET + ChatColor.GREEN + finisherName + " made it to the finish line.");
-            resetPlayerLoadout(participant);
-        sendPlayerToSpawn(activeArena, participant);
-            if (isFinisher) {
+
+            if (isRunner && !finalPhase) {
                 scheduleRunnerReward(participant);
             }
+
+            participant.removePotionEffect(PotionEffectType.SPEED);
+            resetPlayerLoadout(participant);
+            sendPlayerToSpawn(activeArena, participant);
         }
 
         cleanupArena(key, activeArena);
@@ -500,6 +560,15 @@ public class GameManager {
 
         cleanupArena(key, activeArena);
         send(player, ChatColor.GREEN + "Cancelled hunt for arena " + ChatColor.AQUA + activeArena.getArena().getName() + ChatColor.GREEN + ".");
+    }
+
+    public boolean hasActiveArena(String arenaName) {
+        if (arenaName == null || arenaName.trim().isEmpty()) {
+            return false;
+        }
+
+        String key = arenaName.trim().toLowerCase(Locale.ENGLISH);
+        return activeArenas.containsKey(key);
     }
 
     public void shutdown() {
@@ -1316,13 +1385,27 @@ public class GameManager {
         inventory.clear();
 
         ItemStack sword = new ItemStack(Material.NETHERITE_SWORD);
+        var swordMeta = sword.getItemMeta();
+        if (swordMeta != null) {
+            Enchantment sharpness = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("sharpness"));
+            if (sharpness != null) {
+                swordMeta.addEnchant(sharpness, 3, true);
+            }
+            sword.setItemMeta(swordMeta);
+        }
         beast.getInventory().setHeldItemSlot(0);
-        inventory.setItemInMainHand(sword);
+        inventory.setItem(0, sword);
+
+        ItemStack bow = createEnchantedBow();
+        inventory.setItem(1, bow);
 
         ItemStack potion = createHealingPotion();
-        inventory.setItem(1, potion.clone());
         inventory.setItem(2, potion.clone());
         inventory.setItem(3, potion.clone());
+        inventory.setItem(4, potion.clone());
+
+        ItemStack arrow = new ItemStack(Material.ARROW, 1);
+        inventory.setItem(17, arrow);
 
         inventory.setHelmet(new ItemStack(Material.DIAMOND_HELMET));
         inventory.setChestplate(new ItemStack(Material.DIAMOND_CHESTPLATE));
@@ -1354,6 +1437,23 @@ public class GameManager {
         return potion;
     }
 
+    private ItemStack createEnchantedBow() {
+        ItemStack bow = new ItemStack(Material.BOW);
+        var bowMeta = bow.getItemMeta();
+        if (bowMeta != null) {
+            Enchantment infinity = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("infinity"));
+            Enchantment power = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("power"));
+            if (infinity != null) {
+                bowMeta.addEnchant(infinity, 1, true);
+            }
+            if (power != null) {
+                bowMeta.addEnchant(power, 2, true);
+            }
+            bow.setItemMeta(bowMeta);
+        }
+        return bow;
+    }
+
     private void scheduleRunnerReward(Player runner) {
         if (runner == null) {
             return;
@@ -1374,23 +1474,35 @@ public class GameManager {
         }
 
         resetPlayerLoadout(runner);
+        restorePlayerVitals(runner);
+
         PlayerInventory inventory = runner.getInventory();
 
         ItemStack sword = new ItemStack(Material.NETHERITE_SWORD);
         inventory.setItemInMainHand(sword);
 
+        ItemStack bow = createEnchantedBow();
+        inventory.setItem(1, bow);
+
         ItemStack potion = createHealingPotion();
-        inventory.setItem(1, potion.clone());
         inventory.setItem(2, potion.clone());
         inventory.setItem(3, potion.clone());
+        inventory.setItem(4, potion.clone());
+
+        ItemStack arrow = new ItemStack(Material.ARROW, 1);
+        inventory.setItem(17, arrow);
 
         inventory.setHelmet(new ItemStack(Material.NETHERITE_HELMET));
         inventory.setChestplate(new ItemStack(Material.NETHERITE_CHESTPLATE));
         inventory.setLeggings(new ItemStack(Material.NETHERITE_LEGGINGS));
         inventory.setBoots(new ItemStack(Material.NETHERITE_BOOTS));
 
+        PotionEffect speedBoost = new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 1, false, false, true);
+    runner.removePotionEffect(PotionEffectType.SPEED);
+    runner.addPotionEffect(speedBoost);
+
         send(runner, ChatColor.GOLD + "" + ChatColor.BOLD + "Victory spoils! "
-                + ChatColor.RESET + ChatColor.GOLD + "You received full netherite gear for escaping.");
+                + ChatColor.RESET + ChatColor.GOLD + "You bolted through the finish and are ready for the Beast.");
     }
 
     private void cleanupArena(String key, ActiveArena activeArena) {
@@ -1500,8 +1612,8 @@ public class GameManager {
         private final ArenaDefinition arena;
         private final Set<UUID> players = new LinkedHashSet<>();
         private final Set<UUID> runners = new HashSet<>();
-    private final Set<BukkitTask> trackedTasks = new HashSet<>();
-    private final Set<UUID> spectatingRunners = new HashSet<>();
+        private final Set<BukkitTask> trackedTasks = new HashSet<>();
+        private final Set<UUID> spectatingRunners = new HashSet<>();
         private final Map<UUID, RolePreference> preferences = new ConcurrentHashMap<>();
         private List<BlockState> runnerWallSnapshot;
         private List<BlockState> beastWallSnapshot;
@@ -1510,6 +1622,7 @@ public class GameManager {
         private boolean beastWallOpened;
         private boolean selecting;
         private boolean matchActive;
+        private boolean finalPhase;
         private UUID beastId;
 
         private ActiveArena(ArenaDefinition arena) {
@@ -1579,6 +1692,14 @@ public class GameManager {
 
         private void setMatchActive(boolean matchActive) {
             this.matchActive = matchActive;
+        }
+
+        private boolean isFinalPhase() {
+            return finalPhase;
+        }
+
+        private void setFinalPhase(boolean finalPhase) {
+            this.finalPhase = finalPhase;
         }
 
         private UUID getBeastId() {
@@ -1674,6 +1795,7 @@ public class GameManager {
         private void clearMatchState() {
             selecting = false;
             matchActive = false;
+            finalPhase = false;
             beastId = null;
             runners.clear();
             spectatingRunners.clear();

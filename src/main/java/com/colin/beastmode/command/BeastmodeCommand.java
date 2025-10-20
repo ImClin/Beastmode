@@ -25,6 +25,7 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
     private static final String SUB_SETSPAWN = "setspawn";
     private static final String SUB_SETWAITING = "setwaiting";
     private static final String SUB_CANCEL = "cancel";
+    private static final String SUB_DELETE = "delete";
     private static final String SUB_JOIN = "join";
     private static final String ROLE_RUNNER = "runner";
     private static final String ROLE_BEAST = "beast";
@@ -73,10 +74,39 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
             case SUB_CANCEL:
                 handleCancel(player, args);
                 return true;
+            case SUB_DELETE:
+                handleDelete(player, args);
+                return true;
             default:
-                sessionManager.sendPrefixed(player, ChatColor.RED + "Unknown subcommand. Try /beastmode create, /beastmode setspawn, /beastmode setwaiting, /beastmode join, or /beastmode cancel.");
+                sessionManager.sendPrefixed(player, ChatColor.RED + "Unknown subcommand. Try /beastmode create, /beastmode setspawn, /beastmode setwaiting, /beastmode join, /beastmode cancel, or /beastmode delete.");
                 return false;
         }
+    }
+
+    private void handleDelete(Player player, String[] args) {
+        if (args.length < 2) {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "Usage: /beastmode delete <arenaName>");
+            return;
+        }
+
+        String arenaName = args[1];
+        ArenaDefinition arena = arenaStorage.getArena(arenaName);
+        if (arena == null) {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "Arena '" + arenaName + "' was not found.");
+            return;
+        }
+
+        if (gameManager.hasActiveArena(arena.getName())) {
+            gameManager.cancelArena(player, arena.getName());
+        }
+
+        boolean deleted = arenaStorage.deleteArena(arena.getName());
+        if (deleted) {
+            sessionManager.sendPrefixed(player, ChatColor.GREEN + "Arena '" + arena.getName() + "' has been deleted.");
+            return;
+        }
+
+        sessionManager.sendPrefixed(player, ChatColor.RED + "Failed to delete arena '" + arena.getName() + "'.");
     }
 
     private void handleCancel(Player player, String[] args) {
@@ -165,12 +195,12 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 1) {
-            List<String> options = List.of(SUB_CREATE, SUB_SETSPAWN, SUB_SETWAITING, SUB_JOIN, SUB_CANCEL);
+            List<String> options = List.of(SUB_CREATE, SUB_SETSPAWN, SUB_SETWAITING, SUB_JOIN, SUB_CANCEL, SUB_DELETE);
             return StringUtil.copyPartialMatches(args[0], options, new ArrayList<>());
         }
 
         String sub = args[0].toLowerCase(Locale.ENGLISH);
-        if (args.length == 2 && (sub.equals(SUB_SETSPAWN) || sub.equals(SUB_SETWAITING) || sub.equals(SUB_JOIN) || sub.equals(SUB_CANCEL))) {
+        if (args.length == 2 && (sub.equals(SUB_SETSPAWN) || sub.equals(SUB_SETWAITING) || sub.equals(SUB_JOIN) || sub.equals(SUB_CANCEL) || sub.equals(SUB_DELETE))) {
             return arenaStorage.getArenas().stream()
                     .map(ArenaDefinition::getName)
                     .filter(name -> StringUtil.startsWithIgnoreCase(name, args[1]))

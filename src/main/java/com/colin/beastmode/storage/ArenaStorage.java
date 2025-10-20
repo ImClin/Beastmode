@@ -123,6 +123,23 @@ public class ArenaStorage {
         saveArena(updated);
     }
 
+    public boolean deleteArena(String arenaName) {
+        if (arenaName == null || arenaName.trim().isEmpty()) {
+            return false;
+        }
+
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return false;
+        }
+
+        FileConfiguration config = plugin.getConfig();
+        config.set("arenas." + arena.getName(), null);
+        plugin.saveConfig();
+        reload();
+        return true;
+    }
+
     private Location readLocation(ConfigurationSection section) {
         if (section == null) {
             return null;
