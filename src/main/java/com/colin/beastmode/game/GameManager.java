@@ -20,12 +20,14 @@ import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.potion.PotionType;
+import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,10 +50,13 @@ public class GameManager {
     private final Map<String, ActiveArena> activeArenas = new ConcurrentHashMap<>();
     private final Set<UUID> pendingSpawnTeleports = ConcurrentHashMap.newKeySet();
     private final String prefix;
+    private final NamespacedKey exitTokenKey;
+    private final ItemStack exitTokenTemplate;
     private static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     private static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
     private static final String DEFAULT_BEAST_NAME = "The Beast";
+    private static final int EXIT_TOKEN_SLOT = 8;
 
     public enum RolePreference {
         ANY,
@@ -63,6 +68,8 @@ public class GameManager {
         this.plugin = plugin;
         this.arenaStorage = arenaStorage;
         this.prefix = plugin.getConfig().getString("messages.prefix", "[Beastmode] ");
+        this.exitTokenKey = new NamespacedKey(plugin, "exit_token");
+        this.exitTokenTemplate = createExitToken();
     }
 
     public void joinArena(Player player, String arenaName) {
@@ -114,6 +121,9 @@ public class GameManager {
         }
 
         resetPlayerLoadout(player);
+        if (!activeArena.isMatchActive()) {
+            giveExitToken(player);
+        }
 
         send(player, ChatColor.GREEN + "Joined arena " + ChatColor.AQUA + arena.getName() + ChatColor.GREEN + ".");
         if (preference != RolePreference.ANY) {
@@ -395,6 +405,7 @@ public class GameManager {
     player.setGameMode(GameMode.ADVENTURE);
     activeArena.removePlayer(uuid);
     pendingSpawnTeleports.add(uuid);
+    removeExitToken(player);
 
         if (!activeArena.isMatchActive()) {
             List<Player> remaining = collectParticipants(activeArena);
@@ -455,6 +466,7 @@ public class GameManager {
         resetPlayerLoadout(player);
         player.setGameMode(GameMode.ADVENTURE);
         activeArena.removePlayer(uuid);
+    removeExitToken(player);
 
         if (!activeArena.isMatchActive()) {
             List<Player> remaining = collectParticipants(activeArena);
@@ -549,6 +561,8 @@ public class GameManager {
             activeArena.removeSpectatingRunner(player.getUniqueId());
         }
 
+        removeExitToken(player);
+
         forceRespawn(player, () -> {
             player.setGameMode(GameMode.ADVENTURE);
             restorePlayerVitals(player);
@@ -573,6 +587,7 @@ public class GameManager {
             if (destination != null) {
                 player.teleport(destination);
             }
+            removeExitToken(player);
             applySpectatorState(activeArena, player);
             Bukkit.getScheduler().runTaskLater(plugin, () -> applySpectatorState(activeArena, player), 2L);
         });
@@ -1037,6 +1052,7 @@ public class GameManager {
             runnerIds.add(player.getUniqueId());
         }
         activeArena.setRunners(runnerIds);
+        removeExitTokens(current);
     announceBeast(current, beast);
     scheduleTeleportCountdownStart(key, activeArena, arena, beast);
     }
@@ -1493,6 +1509,66 @@ public class GameManager {
         inventory.setBoots(boots);
 
         send(beast, ChatColor.DARK_RED + "" + ChatColor.BOLD + "You gear up in unbreakable armor.");
+    }
+
+    private ItemStack createExitToken() {
+        ItemStack stack = new ItemStack(Material.NETHER_STAR);
+        var meta = stack.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(ChatColor.GOLD + "Leave Hunt");
+            meta.setLore(List.of(ChatColor.GRAY + "Right-click to leave the queue."));
+            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
+            meta.setUnbreakable(true);
+            meta.getPersistentDataContainer().set(exitTokenKey, PersistentDataType.BYTE, (byte) 1);
+            stack.setItemMeta(meta);
+        }
+        return stack;
+    }
+
+    private void giveExitToken(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        PlayerInventory inventory = player.getInventory();
+        ItemStack current = inventory.getItem(EXIT_TOKEN_SLOT);
+        if (isExitToken(current)) {
+            return;
+        }
+        ItemStack token = exitTokenTemplate.clone();
+        inventory.setItem(EXIT_TOKEN_SLOT, token);
+    }
+
+    private void removeExitToken(Player player) {
+        if (player == null) {
+            return;
+        }
+        PlayerInventory inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            ItemStack item = inventory.getItem(slot);
+            if (isExitToken(item)) {
+                inventory.clear(slot);
+            }
+        }
+    }
+
+    private void removeExitTokens(Collection<Player> players) {
+        if (players == null) {
+            return;
+        }
+        for (Player player : players) {
+            removeExitToken(player);
+        }
+    }
+
+    public boolean isExitToken(ItemStack stack) {
+        if (stack == null || stack.getType() != Material.NETHER_STAR) {
+            return false;
+        }
+        var meta = stack.getItemMeta();
+        if (meta == null) {
+            return false;
+        }
+        return meta.getPersistentDataContainer().has(exitTokenKey, PersistentDataType.BYTE);
     }
 
     private ItemStack createHealingPotion() {

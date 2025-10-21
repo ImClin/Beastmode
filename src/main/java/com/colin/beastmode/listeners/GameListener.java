@@ -6,7 +6,10 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -15,6 +18,7 @@ import org.bukkit.block.Block;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
 
 public class GameListener implements Listener {
 
@@ -56,6 +60,17 @@ public class GameListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onPlayerInteract(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
+
+        ItemStack usedItem = event.getItem();
+        if (usedItem == null) {
+            usedItem = event.getPlayer().getInventory().getItemInMainHand();
+        }
+
+        if (usedItem != null && gameManager.isExitToken(usedItem)) {
+            event.setCancelled(true);
+            gameManager.handleSpawnCommand(event.getPlayer());
             return;
         }
         Action action = event.getAction();
@@ -104,6 +119,36 @@ public class GameListener implements Listener {
 
         if (gameManager.shouldCancelDamage(player)) {
             event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerDrop(PlayerDropItemEvent event) {
+        if (gameManager.isExitToken(event.getItemDrop().getItemStack())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player)) {
+            return;
+        }
+        if (gameManager.isExitToken(event.getCurrentItem()) || gameManager.isExitToken(event.getCursor())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (!(event.getWhoClicked() instanceof Player)) {
+            return;
+        }
+        for (ItemStack stack : event.getNewItems().values()) {
+            if (gameManager.isExitToken(stack)) {
+                event.setCancelled(true);
+                return;
+            }
         }
     }
 }
