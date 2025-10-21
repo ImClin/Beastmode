@@ -1556,7 +1556,8 @@ public class GameManager {
             }
             sword.setItemMeta(swordMeta);
         }
-        inventory.setItemInMainHand(sword);
+        inventory.setItem(0, sword);
+        runner.getInventory().setHeldItemSlot(0);
 
     ItemStack bow = createEnchantedBow(1);
     inventory.setItem(1, bow);
