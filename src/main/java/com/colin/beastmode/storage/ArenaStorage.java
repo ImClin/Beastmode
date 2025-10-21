@@ -123,6 +123,69 @@ public class ArenaStorage {
         saveArena(updated);
     }
 
+    public void updateRunnerSpawn(String arenaName, Location runnerSpawn) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withRunnerSpawn(runnerSpawn);
+        saveArena(updated);
+    }
+
+    public void updateBeastSpawn(String arenaName, Location beastSpawn) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withBeastSpawn(beastSpawn);
+        saveArena(updated);
+    }
+
+    public void updateRunnerWallDelay(String arenaName, int seconds) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withRunnerWallDelay(seconds);
+        saveArena(updated);
+    }
+
+    public void updateBeastReleaseDelay(String arenaName, int seconds) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withBeastReleaseDelay(seconds);
+        saveArena(updated);
+    }
+
+    public void updateRunnerWall(String arenaName, Cuboid cuboid) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withRunnerWall(cuboid);
+        saveArena(updated);
+    }
+
+    public void updateBeastWall(String arenaName, Cuboid cuboid) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withBeastWall(cuboid);
+        saveArena(updated);
+    }
+
+    public void updateFinishButton(String arenaName, Location finishButton) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withFinishButton(finishButton);
+        saveArena(updated);
+    }
+
     public boolean deleteArena(String arenaName) {
         if (arenaName == null || arenaName.trim().isEmpty()) {
             return false;

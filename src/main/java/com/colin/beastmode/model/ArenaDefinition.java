@@ -164,11 +164,109 @@ public class ArenaDefinition {
                 .beastWall(beastWall)
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
-                .waitingSpawn(location)
+                .waitingSpawn(location != null ? location.clone() : null)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .build();
+    }
+
+    public ArenaDefinition withRunnerSpawn(Location location) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(location != null ? location.clone() : null)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .build();
+    }
+
+    public ArenaDefinition withBeastSpawn(Location location) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(location != null ? location.clone() : null)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .build();
+    }
+
+    public ArenaDefinition withRunnerWall(Cuboid wall) {
+        return builder(name)
+                .runnerWall(wall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .build();
+    }
+
+    public ArenaDefinition withBeastWall(Cuboid wall) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(wall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .build();
+    }
+
+    public ArenaDefinition withRunnerWallDelay(int seconds) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(seconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .build();
+    }
+
+    public ArenaDefinition withBeastReleaseDelay(int seconds) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(seconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .build();
+    }
+
+    public ArenaDefinition withFinishButton(Location location) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(location != null ? location.clone() : null)
+                .finishRegion(null)
                 .build();
     }
 

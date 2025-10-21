@@ -20,11 +20,13 @@ public class ArenaMenu {
     private static final int INVENTORY_SIZE = 54;
     private static final String TITLE = ChatColor.DARK_PURPLE + "Beastmode Arenas";
     private final ArenaStorage arenaStorage;
-    private final Beastmode plugin;
+    private final String prefix;
+    private final ArenaEditMenu editMenu;
 
-    public ArenaMenu(Beastmode plugin, ArenaStorage arenaStorage) {
-        this.plugin = plugin;
+    public ArenaMenu(Beastmode plugin, ArenaStorage arenaStorage, ArenaEditMenu editMenu) {
         this.arenaStorage = arenaStorage;
+        this.editMenu = editMenu;
+        this.prefix = plugin.getConfig().getString("messages.prefix", "[Beastmode] ");
     }
 
     public void open(Player player) {
@@ -44,12 +46,22 @@ public class ArenaMenu {
             return;
         }
         String arenaName = ChatColor.stripColor(meta.getDisplayName());
-        player.sendMessage(plugin.getConfig().getString("messages.prefix", "[Beastmode] ")
-                + ChatColor.GOLD + "Selected arena " + arenaName + ChatColor.GRAY + ". Detailed editing GUI coming soon.");
+        if (arenaName == null || arenaName.isBlank()) {
+            return;
+        }
+
+        ArenaDefinition arena = arenaStorage.getArena(arenaName);
+        if (arena == null) {
+            player.sendMessage(prefix + ChatColor.RED + "Arena '" + arenaName + "' no longer exists.");
+            player.closeInventory();
+            return;
+        }
+        player.closeInventory();
+        editMenu.open(player, arena.getName());
     }
 
     private Inventory buildInventory() {
-    Inventory inventory = Bukkit.createInventory(null, INVENTORY_SIZE, TITLE);
+        Inventory inventory = Bukkit.createInventory(null, INVENTORY_SIZE, TITLE);
         Collection<ArenaDefinition> arenas = arenaStorage.getArenas();
         if (arenas.isEmpty()) {
             inventory.setItem(22, createPlaceholderItem(ChatColor.YELLOW + "No arenas configured"));
@@ -80,6 +92,8 @@ public class ArenaMenu {
             lore.add(statusLine("Beast release delay", arena.getBeastReleaseDelaySeconds() >= 0));
             lore.add(statusLine("Finish button", arena.getFinishButton() != null));
             lore.add(ChatColor.GRAY + "Status: " + (arena.isComplete() ? ChatColor.GREEN + "Ready" : ChatColor.YELLOW + "Incomplete"));
+            lore.add("");
+            lore.add(ChatColor.AQUA + "Click to edit this arena.");
             meta.setLore(lore);
             itemStack.setItemMeta(meta);
         }
@@ -98,5 +112,9 @@ public class ArenaMenu {
 
     private String statusLine(String label, boolean value) {
         return ChatColor.GRAY + label + ": " + (value ? ChatColor.GREEN + "set" : ChatColor.RED + "missing");
+    }
+
+    public void openEditor(Player player, String arenaName) {
+        editMenu.open(player, arenaName);
     }
 }

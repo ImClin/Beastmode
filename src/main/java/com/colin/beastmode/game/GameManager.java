@@ -46,11 +46,11 @@ public class GameManager {
     private final Beastmode plugin;
     private final ArenaStorage arenaStorage;
     private final Map<String, ActiveArena> activeArenas = new ConcurrentHashMap<>();
+    private final Set<UUID> pendingSpawnTeleports = ConcurrentHashMap.newKeySet();
     private final String prefix;
     private static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     private static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
-    private static final String COMMAND_SPAWN = "spawn";
     private static final String DEFAULT_BEAST_NAME = "The Beast";
 
     public enum RolePreference {
@@ -295,7 +295,7 @@ public class GameManager {
             participant.sendTitle(title, subtitle, 10, 60, 10);
             participant.playSound(participant.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
 
-            if (isRunner && !finalPhase) {
+            if (isRunner && !finalPhase && !activeArena.isRewardSuppressed()) {
                 scheduleRunnerReward(participant);
             }
 
@@ -393,7 +393,8 @@ public class GameManager {
     boolean wasBeast = activeArena.getBeastId() != null && activeArena.getBeastId().equals(uuid);
     resetPlayerLoadout(player);
     player.setGameMode(GameMode.ADVENTURE);
-        activeArena.removePlayer(uuid);
+    activeArena.removePlayer(uuid);
+    pendingSpawnTeleports.add(uuid);
 
         if (!activeArena.isMatchActive()) {
             List<Player> remaining = collectParticipants(activeArena);
@@ -414,8 +415,88 @@ public class GameManager {
         }
 
         if (wasBeast) {
+            activeArena.setRewardSuppressed(true);
             completeRunnerVictory(key, activeArena, null);
         }
+    }
+
+    public void handlePlayerJoin(Player player) {
+        if (player == null) {
+            return;
+        }
+
+        UUID uuid = player.getUniqueId();
+        if (!pendingSpawnTeleports.remove(uuid)) {
+            return;
+        }
+
+        sendPlayerToSpawn(null, player);
+    }
+
+    public boolean handleSpawnCommand(Player player) {
+        if (player == null) {
+            return false;
+        }
+
+        UUID uuid = player.getUniqueId();
+        String key = findArenaByPlayer(uuid);
+        if (key == null) {
+            return false;
+        }
+
+        ActiveArena activeArena = activeArenas.get(key);
+        if (activeArena == null) {
+            return false;
+        }
+
+        boolean wasRunner = activeArena.isRunner(uuid);
+        boolean wasBeast = activeArena.getBeastId() != null && activeArena.getBeastId().equals(uuid);
+
+        resetPlayerLoadout(player);
+        player.setGameMode(GameMode.ADVENTURE);
+        activeArena.removePlayer(uuid);
+
+        if (!activeArena.isMatchActive()) {
+            List<Player> remaining = collectParticipants(activeArena);
+            if (remaining.isEmpty()) {
+                cleanupArena(key, activeArena);
+            } else if (remaining.size() < 2 && activeArena.isSelecting()) {
+                activeArena.setSelecting(false);
+                notifyWaitingForPlayers(remaining);
+            }
+            sendPlayerToSpawn(activeArena, player);
+            send(player, ChatColor.YELLOW + "You left the hunt.");
+            return true;
+        }
+
+        if (wasRunner) {
+            handleRunnerElimination(key, activeArena, null);
+        } else if (wasBeast) {
+            activeArena.setRewardSuppressed(true);
+            completeRunnerVictory(key, activeArena, null);
+        }
+
+        sendPlayerToSpawn(activeArena, player);
+        send(player, ChatColor.YELLOW + "You left the hunt.");
+        return true;
+    }
+
+    public boolean shouldCancelDamage(Player player) {
+        if (player == null) {
+            return false;
+        }
+
+        String key = findArenaByPlayer(player.getUniqueId());
+        if (key == null) {
+            return false;
+        }
+
+        ActiveArena activeArena = activeArenas.get(key);
+        if (activeArena == null) {
+            return false;
+        }
+
+        return activeArena.isDamageProtectionActive();
     }
 
     private boolean handleRunnerElimination(String key, ActiveArena activeArena, Player eliminated) {
@@ -475,7 +556,6 @@ public class GameManager {
             if (globalSpawn != null) {
                 player.teleport(globalSpawn.clone());
             }
-            player.performCommand(COMMAND_SPAWN);
         });
     }
 
@@ -579,6 +659,7 @@ public class GameManager {
             activeArena.setRunning(false);
         }
         activeArenas.clear();
+        pendingSpawnTeleports.clear();
     }
 
     private String findArenaByPlayer(UUID uuid) {
@@ -603,6 +684,7 @@ public class GameManager {
 
         activeArena.setRunning(true);
         activeArena.clearMatchState();
+        activeArena.enableDamageProtection();
         if (activeArena.isRunnerWallOpened() || activeArena.isBeastWallOpened()) {
             resetArenaState(activeArena);
         }
@@ -1124,6 +1206,7 @@ public class GameManager {
                 setCuboidToAir(arena.getRunnerWall());
             }
             activeArena.setRunnerWallOpened(true);
+            activeArena.releaseDamageProtectionAfter(1000L);
         }
     }
 
@@ -1627,6 +1710,8 @@ public class GameManager {
         private boolean selecting;
         private boolean matchActive;
         private boolean finalPhase;
+    private boolean rewardSuppressed;
+    private long invulnerabilityUntilMillis;
         private UUID beastId;
 
         private ActiveArena(ArenaDefinition arena) {
@@ -1704,6 +1789,40 @@ public class GameManager {
 
         private void setFinalPhase(boolean finalPhase) {
             this.finalPhase = finalPhase;
+        }
+
+        private boolean isRewardSuppressed() {
+            return rewardSuppressed;
+        }
+
+        private void setRewardSuppressed(boolean rewardSuppressed) {
+            this.rewardSuppressed = rewardSuppressed;
+        }
+
+        private void enableDamageProtection() {
+            invulnerabilityUntilMillis = Long.MAX_VALUE;
+        }
+
+        private void releaseDamageProtectionAfter(long delayMillis) {
+            invulnerabilityUntilMillis = System.currentTimeMillis() + Math.max(delayMillis, 0L);
+        }
+
+        private void clearDamageProtection() {
+            invulnerabilityUntilMillis = 0L;
+        }
+
+        private boolean isDamageProtectionActive() {
+            if (invulnerabilityUntilMillis == 0L) {
+                return false;
+            }
+            if (invulnerabilityUntilMillis == Long.MAX_VALUE) {
+                return true;
+            }
+            if (System.currentTimeMillis() <= invulnerabilityUntilMillis) {
+                return true;
+            }
+            invulnerabilityUntilMillis = 0L;
+            return false;
         }
 
         private UUID getBeastId() {
@@ -1800,6 +1919,8 @@ public class GameManager {
             selecting = false;
             matchActive = false;
             finalPhase = false;
+            rewardSuppressed = false;
+            clearDamageProtection();
             beastId = null;
             runners.clear();
             spectatingRunners.clear();

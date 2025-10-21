@@ -2,6 +2,7 @@ package com.colin.beastmode.setup;
 
 import com.colin.beastmode.Beastmode;
 import com.colin.beastmode.model.ArenaDefinition;
+import com.colin.beastmode.model.Cuboid;
 import com.colin.beastmode.storage.ArenaStorage;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -73,6 +74,7 @@ public class SetupSessionManager {
         }
 
         SetupStage stage = session.getStage();
+        SetupMode mode = session.getMode();
         if (!stage.expectsBlockSelection()) {
             send(player, ChatColor.RED + "You are not selecting blocks right now. Current stage: " + stage.name());
             return true;
@@ -92,6 +94,13 @@ public class SetupSessionManager {
                 }
                 session.setRunnerWallPos2(blockLocation);
                 send(player, ChatColor.GREEN + "Runner wall defined.");
+                if (mode == SetupMode.EDIT_RUNNER_WALL) {
+                    Cuboid runnerWall = Cuboid.fromCorners(session.getRunnerWallPos1(), session.getRunnerWallPos2());
+                    arenaStorage.updateRunnerWall(session.getArenaName(), runnerWall);
+                    finishEdit(player, session, ChatColor.GREEN + "Runner wall updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
                 advanceStage(session, SetupStage.BEAST_WALL_POS1);
             }
             case BEAST_WALL_POS1 -> {
@@ -106,6 +115,13 @@ public class SetupSessionManager {
                 }
                 session.setBeastWallPos2(blockLocation);
                 send(player, ChatColor.GREEN + "Beast wall defined.");
+                if (mode == SetupMode.EDIT_BEAST_WALL) {
+                    Cuboid beastWall = Cuboid.fromCorners(session.getBeastWallPos1(), session.getBeastWallPos2());
+                    arenaStorage.updateBeastWall(session.getArenaName(), beastWall);
+                    finishEdit(player, session, ChatColor.GREEN + "Beast wall updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
                 advanceStage(session, SetupStage.RUNNER_SPAWN);
             }
             case FINISH_BUTTON -> {
@@ -114,6 +130,12 @@ public class SetupSessionManager {
                     return true;
                 }
                 session.setFinishButton(blockLocation);
+                if (mode == SetupMode.EDIT_FINISH_BUTTON) {
+                    arenaStorage.updateFinishButton(session.getArenaName(), blockLocation.clone());
+                    finishEdit(player, session, ChatColor.GREEN + "Finish button updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
                 send(player, ChatColor.GREEN + "Finish button saved. Setup complete!");
                 completeSession(player, session);
             }
@@ -169,6 +191,7 @@ public class SetupSessionManager {
             return false;
         }
         SetupStage stage = session.getStage();
+        SetupMode mode = session.getMode();
         if (!stage.expectsChatNumber()) {
             return false;
         }
@@ -181,11 +204,23 @@ public class SetupSessionManager {
             case RUNNER_WALL_DELAY -> {
                 session.setRunnerWallDelaySeconds(value);
                 send(player, ChatColor.GREEN + "Runner wall delay set to " + value + " seconds.");
+                if (mode == SetupMode.EDIT_RUNNER_DELAY) {
+                    arenaStorage.updateRunnerWallDelay(session.getArenaName(), value);
+                    finishEdit(player, session, ChatColor.GREEN + "Runner wall delay updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
                 advanceStage(session, SetupStage.BEAST_RELEASE_DELAY);
             }
             case BEAST_RELEASE_DELAY -> {
                 session.setBeastReleaseDelaySeconds(value);
                 send(player, ChatColor.GREEN + "Beast release delay set to " + value + " seconds.");
+                if (mode == SetupMode.EDIT_BEAST_DELAY) {
+                    arenaStorage.updateBeastReleaseDelay(session.getArenaName(), value);
+                    finishEdit(player, session, ChatColor.GREEN + "Beast release delay updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
                 advanceStage(session, SetupStage.FINISH_BUTTON);
             }
             default -> send(player, ChatColor.RED + "Unexpected numeric stage: " + stage.name());
@@ -297,5 +332,95 @@ public class SetupSessionManager {
 
         sessions.remove(player.getUniqueId());
         removeWand(player);
+    }
+
+    private void finishEdit(Player player, SetupSession session, String message) {
+        send(player, message);
+        sessions.remove(player.getUniqueId());
+        removeWand(player);
+    }
+
+    public boolean beginRunnerWallEdit(Player player, String arenaName) {
+        return beginSelectionEdit(player, arenaName, SetupMode.EDIT_RUNNER_WALL, SetupStage.RUNNER_WALL_POS1,
+                ChatColor.YELLOW + "Select the first corner of the runner wall.");
+    }
+
+    public boolean beginBeastWallEdit(Player player, String arenaName) {
+        return beginSelectionEdit(player, arenaName, SetupMode.EDIT_BEAST_WALL, SetupStage.BEAST_WALL_POS1,
+                ChatColor.YELLOW + "Select the first corner of the beast wall.");
+    }
+
+    public boolean beginFinishButtonEdit(Player player, String arenaName) {
+        return beginSelectionEdit(player, arenaName, SetupMode.EDIT_FINISH_BUTTON, SetupStage.FINISH_BUTTON,
+                ChatColor.YELLOW + "Click the new finish button block.");
+    }
+
+    public boolean beginRunnerDelayEdit(Player player, String arenaName) {
+        return beginNumericEdit(player, arenaName, SetupMode.EDIT_RUNNER_DELAY, SetupStage.RUNNER_WALL_DELAY,
+                ChatColor.YELLOW + "Type the new runner wall delay in chat." + ChatColor.GRAY + " (or 'cancel')");
+    }
+
+    public boolean beginBeastDelayEdit(Player player, String arenaName) {
+        return beginNumericEdit(player, arenaName, SetupMode.EDIT_BEAST_DELAY, SetupStage.BEAST_RELEASE_DELAY,
+                ChatColor.YELLOW + "Type the new beast release delay in chat." + ChatColor.GRAY + " (or 'cancel')");
+    }
+
+    private boolean beginSelectionEdit(Player player, String arenaName, SetupMode mode, SetupStage stage, String instruction) {
+        ArenaDefinition arena = requireEditableArena(player, arenaName);
+        if (arena == null) {
+            return false;
+        }
+        if (sessions.containsKey(player.getUniqueId())) {
+            send(player, ChatColor.RED + "You are already editing an arena. Finish or cancel first.");
+            return false;
+        }
+
+        SetupSession session = new SetupSession(player.getUniqueId(), arena.getName());
+        session.setMode(mode);
+        session.setStage(stage);
+        sessions.put(player.getUniqueId(), session);
+        giveWand(player);
+        send(player, instruction);
+        if (mode == SetupMode.EDIT_RUNNER_WALL) {
+            send(player, ChatColor.GRAY + "Left-click to set the first corner, right-click to set the second.");
+        } else if (mode == SetupMode.EDIT_BEAST_WALL) {
+            send(player, ChatColor.GRAY + "Left-click to set the first corner, right-click to set the second.");
+        }
+        return true;
+    }
+
+    private boolean beginNumericEdit(Player player, String arenaName, SetupMode mode, SetupStage stage, String instruction) {
+        ArenaDefinition arena = requireEditableArena(player, arenaName);
+        if (arena == null) {
+            return false;
+        }
+        if (sessions.containsKey(player.getUniqueId())) {
+            send(player, ChatColor.RED + "You are already editing an arena. Finish or cancel first.");
+            return false;
+        }
+
+        SetupSession session = new SetupSession(player.getUniqueId(), arena.getName());
+        session.setMode(mode);
+        session.setStage(stage);
+        sessions.put(player.getUniqueId(), session);
+        send(player, instruction);
+        return true;
+    }
+
+    private ArenaDefinition requireEditableArena(Player player, String arenaName) {
+        if (arenaName == null || arenaName.trim().isEmpty()) {
+            send(player, ChatColor.RED + "Provide a valid arena name.");
+            return null;
+        }
+        if (!player.hasPermission("beastmode.command")) {
+            send(player, ChatColor.RED + "You do not have permission to edit arenas.");
+            return null;
+        }
+        ArenaDefinition arena = arenaStorage.getArena(arenaName);
+        if (arena == null) {
+            send(player, ChatColor.RED + "Arena '" + arenaName + "' does not exist.");
+            return null;
+        }
+        return arena;
     }
 }

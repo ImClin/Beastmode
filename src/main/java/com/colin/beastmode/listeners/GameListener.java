@@ -1,12 +1,16 @@
 package com.colin.beastmode.listeners;
 
 import com.colin.beastmode.game.GameManager;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.block.Block;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -43,6 +47,11 @@ public class GameListener implements Listener {
     public void onPlayerKick(PlayerKickEvent event) {
         gameManager.handlePlayerQuit(event.getPlayer());
     }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        gameManager.handlePlayerJoin(event.getPlayer());
+    }
     
     @EventHandler(ignoreCancelled = true)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -58,5 +67,43 @@ public class GameListener implements Listener {
             return;
         }
         gameManager.handlePlayerInteract(event.getPlayer(), block);
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
+        String message = event.getMessage();
+        if (message == null || message.isEmpty()) {
+            return;
+        }
+
+        String withoutSlash = message.charAt(0) == '/' ? message.substring(1) : message;
+        if (withoutSlash.isEmpty()) {
+            return;
+        }
+
+        String commandName = withoutSlash.split(" ", 2)[0];
+        int namespaceIndex = commandName.lastIndexOf(':');
+        if (namespaceIndex >= 0 && namespaceIndex + 1 < commandName.length()) {
+            commandName = commandName.substring(namespaceIndex + 1);
+        }
+
+        if (!commandName.equalsIgnoreCase("spawn")) {
+            return;
+        }
+
+        if (gameManager.handleSpawnCommand(event.getPlayer())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onEntityDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+
+        if (gameManager.shouldCancelDamage(player)) {
+            event.setCancelled(true);
+        }
     }
 }

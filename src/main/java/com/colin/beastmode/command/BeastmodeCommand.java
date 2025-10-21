@@ -27,6 +27,7 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
     private static final String SUB_CANCEL = "cancel";
     private static final String SUB_DELETE = "delete";
     private static final String SUB_JOIN = "join";
+    private static final String SUB_EDIT = "edit";
     private static final String ROLE_RUNNER = "runner";
     private static final String ROLE_BEAST = "beast";
     private static final String ROLE_ANY = "any";
@@ -53,7 +54,7 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 0) {
-            arenaMenu.open(player);
+            sessionManager.sendPrefixed(player, ChatColor.YELLOW + "Try /beastmode join <arena> or /beastmode edit.");
             return true;
         }
 
@@ -77,10 +78,23 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
             case SUB_DELETE:
                 handleDelete(player, args);
                 return true;
+            case SUB_EDIT:
+                handleEdit(player, args);
+                return true;
             default:
-                sessionManager.sendPrefixed(player, ChatColor.RED + "Unknown subcommand. Try /beastmode create, /beastmode setspawn, /beastmode setwaiting, /beastmode join, /beastmode cancel, or /beastmode delete.");
+                sessionManager.sendPrefixed(player, ChatColor.RED + "Unknown subcommand. Try /beastmode create, /beastmode setspawn, /beastmode setwaiting, /beastmode join, /beastmode cancel, /beastmode delete, or /beastmode edit.");
                 return false;
         }
+    }
+
+    private void handleEdit(Player player, String[] args) {
+        if (args.length == 1) {
+            arenaMenu.open(player);
+            return;
+        }
+
+        String arenaName = args[1];
+        arenaMenu.openEditor(player, arenaName);
     }
 
     private void handleDelete(Player player, String[] args) {
@@ -195,12 +209,13 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 1) {
-            List<String> options = List.of(SUB_CREATE, SUB_SETSPAWN, SUB_SETWAITING, SUB_JOIN, SUB_CANCEL, SUB_DELETE);
+            List<String> options = List.of(SUB_CREATE, SUB_SETSPAWN, SUB_SETWAITING, SUB_JOIN, SUB_CANCEL, SUB_DELETE, SUB_EDIT);
             return StringUtil.copyPartialMatches(args[0], options, new ArrayList<>());
         }
 
         String sub = args[0].toLowerCase(Locale.ENGLISH);
-        if (args.length == 2 && (sub.equals(SUB_SETSPAWN) || sub.equals(SUB_SETWAITING) || sub.equals(SUB_JOIN) || sub.equals(SUB_CANCEL) || sub.equals(SUB_DELETE))) {
+        if (args.length == 2 && (sub.equals(SUB_SETSPAWN) || sub.equals(SUB_SETWAITING) || sub.equals(SUB_JOIN)
+                || sub.equals(SUB_CANCEL) || sub.equals(SUB_DELETE) || sub.equals(SUB_EDIT))) {
             return arenaStorage.getArenas().stream()
                     .map(ArenaDefinition::getName)
                     .filter(name -> StringUtil.startsWithIgnoreCase(name, args[1]))

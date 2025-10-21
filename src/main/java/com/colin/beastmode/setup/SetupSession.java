@@ -11,6 +11,7 @@ public class SetupSession {
     private final UUID playerId;
     private final String arenaName;
     private SetupStage stage;
+    private SetupMode mode;
     private Location runnerWallPos1;
     private Location runnerWallPos2;
     private Location beastWallPos1;
@@ -25,6 +26,7 @@ public class SetupSession {
         this.playerId = playerId;
         this.arenaName = arenaName;
         this.stage = SetupStage.RUNNER_WALL_POS1;
+        this.mode = SetupMode.CREATE;
     }
 
     public UUID getPlayerId() {
@@ -41,6 +43,14 @@ public class SetupSession {
 
     public void setStage(SetupStage stage) {
         this.stage = stage;
+    }
+
+    public SetupMode getMode() {
+        return mode;
+    }
+
+    public void setMode(SetupMode mode) {
+        this.mode = mode;
     }
 
     public void setRunnerWallPos1(Location location) {
