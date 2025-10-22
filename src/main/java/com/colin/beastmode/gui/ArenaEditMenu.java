@@ -43,21 +43,22 @@ public class ArenaEditMenu {
             return;
         }
 
-        Inventory inventory = Bukkit.createInventory(null, 27, TITLE_PREFIX + ChatColor.AQUA + arena.getName());
+        Inventory inventory = Bukkit.createInventory(null, 36, TITLE_PREFIX + ChatColor.AQUA + arena.getName());
+
         inventory.setItem(10, runnerSpawnItem(arena));
         inventory.setItem(11, beastSpawnItem(arena));
         inventory.setItem(12, waitingSpawnItem(arena));
         inventory.setItem(13, runnerWallItem());
         inventory.setItem(14, beastWallItem());
+        inventory.setItem(15, finishButtonItem(arena));
 
-        inventory.setItem(19, finishButtonItem(arena));
-        inventory.setItem(20, runnerDelayItem(arena));
-        inventory.setItem(21, beastDelayItem(arena));
-        inventory.setItem(22, minRunnersItem(arena));
-        inventory.setItem(23, maxRunnersItem(arena));
+        inventory.setItem(19, runnerDelayItem(arena));
+        inventory.setItem(20, beastDelayItem(arena));
+        inventory.setItem(21, minRunnersItem(arena));
+        inventory.setItem(22, maxRunnersItem(arena));
 
-        inventory.setItem(24, reconfigureItem());
-        inventory.setItem(26, closeItem());
+        inventory.setItem(31, reconfigureItem());
+        inventory.setItem(35, closeItem());
 
         player.openInventory(inventory);
     }
