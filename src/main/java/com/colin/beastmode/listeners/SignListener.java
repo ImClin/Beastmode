@@ -58,11 +58,8 @@ public class SignListener implements Listener {
             return;
         }
 
-        event.setLine(0, SIGN_KEY);
-        event.setLine(1, ChatColor.AQUA + arena.getName());
-        event.setLine(2, ChatColor.YELLOW + "Click to join");
-        event.setLine(3, ChatColor.GREEN + "Status: "
-                + (arena.isComplete() ? ChatColor.GREEN + "Ready" : ChatColor.RED + "Setup"));
+    GameManager.ArenaStatus status = gameManager.getArenaStatus(arena.getName());
+    applyLines(event, status);
         player.sendMessage(prefix + ChatColor.GREEN + "Join sign created for arena '" + arena.getName() + "'.");
     }
 
@@ -97,10 +94,67 @@ public class SignListener implements Listener {
 
         ArenaDefinition arena = arenaStorage.getArena(arenaName);
         if (arena == null) {
+            applyMissing(front);
+            applyMissing(sign.getSide(Side.BACK));
+            sign.update();
             player.sendMessage(prefix + ChatColor.RED + "Arena '" + arenaName + "' no longer exists.");
             return;
         }
 
+        updateSign(sign, arena.getName());
         gameManager.joinArena(player, arena.getName());
+        updateSign(sign, arena.getName());
+    }
+
+    private void applyLines(SignChangeEvent event, GameManager.ArenaStatus status) {
+        event.setLine(0, SIGN_KEY);
+        event.setLine(1, ChatColor.AQUA + status.getArenaName());
+        event.setLine(2, formatPlayerLine(status));
+        event.setLine(3, formatStatusLine(status));
+    }
+
+    private void updateSign(Sign sign, String arenaName) {
+        GameManager.ArenaStatus status = gameManager.getArenaStatus(arenaName);
+        applyLines(sign.getSide(Side.FRONT), status);
+        applyLines(sign.getSide(Side.BACK), status);
+        sign.update();
+    }
+
+    private void applyLines(SignSide side, GameManager.ArenaStatus status) {
+        if (side == null) {
+            return;
+        }
+        side.setLine(0, SIGN_KEY);
+        side.setLine(1, ChatColor.AQUA + status.getArenaName());
+        side.setLine(2, formatPlayerLine(status));
+        side.setLine(3, formatStatusLine(status));
+    }
+
+    private String formatPlayerLine(GameManager.ArenaStatus status) {
+        int count = status.getPlayerCount();
+        if (status.hasCapacityLimit()) {
+            return ChatColor.YELLOW + "Players: " + count + "/" + status.getCapacity();
+        }
+        return ChatColor.YELLOW + "Players: " + count;
+    }
+
+    private String formatStatusLine(GameManager.ArenaStatus status) {
+        if (!status.isComplete()) {
+            return ChatColor.RED + "Status: Setup";
+        }
+        if (status.isBusy()) {
+            return ChatColor.RED + "Status: In-Game";
+        }
+        return ChatColor.GREEN + "Status: Ready";
+    }
+
+    private void applyMissing(SignSide side) {
+        if (side == null) {
+            return;
+        }
+        side.setLine(0, SIGN_KEY);
+        side.setLine(1, ChatColor.RED + "Unknown");
+        side.setLine(2, ChatColor.DARK_RED + "Arena missing");
+        side.setLine(3, ChatColor.RED + "Status: Offline");
     }
 }

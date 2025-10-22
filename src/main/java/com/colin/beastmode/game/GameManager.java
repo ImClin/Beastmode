@@ -713,6 +713,40 @@ public class GameManager {
         return uuid != null && findArenaByPlayer(uuid) != null;
     }
 
+    public ArenaStatus getArenaStatus(String arenaName) {
+        if (arenaName == null || arenaName.trim().isEmpty()) {
+            return ArenaStatus.unavailable("");
+        }
+
+        ArenaDefinition arena = arenaStorage.getArena(arenaName);
+        if (arena == null) {
+            return ArenaStatus.unavailable(arenaName.trim());
+        }
+
+        String key = arena.getName().toLowerCase(Locale.ENGLISH);
+        ActiveArena activeArena = activeArenas.get(key);
+
+        int playerCount = 0;
+        boolean running = false;
+        boolean selecting = false;
+        boolean matchActive = false;
+
+        if (activeArena != null) {
+            playerCount = countActivePlayers(activeArena);
+            running = activeArena.isRunning();
+            selecting = activeArena.isSelecting();
+            matchActive = activeArena.isMatchActive();
+        }
+
+        int capacity = getQueueLimit(arena);
+        if (capacity == Integer.MAX_VALUE) {
+            capacity = -1;
+        }
+
+        return new ArenaStatus(arena.getName(), arena.isComplete(), playerCount, capacity,
+                running, selecting, matchActive);
+    }
+
     private void startMatch(String key, ActiveArena activeArena) {
         if (activeArena.isRunning() || activeArena.isSelecting() || activeArena.isMatchActive()) {
             return;
@@ -1813,6 +1847,20 @@ public class GameManager {
         return participants;
     }
 
+    private int countActivePlayers(ActiveArena activeArena) {
+        if (activeArena == null) {
+            return 0;
+        }
+        int count = 0;
+        for (UUID id : activeArena.getPlayerIds()) {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null && player.isOnline()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private void send(Player player, String message) {
         player.sendMessage(prefix + message);
     }
@@ -1850,6 +1898,67 @@ public class GameManager {
         return first.getBlockX() == second.getBlockX()
                 && first.getBlockY() == second.getBlockY()
                 && first.getBlockZ() == second.getBlockZ();
+    }
+
+    public static final class ArenaStatus {
+        private final String arenaName;
+        private final boolean complete;
+        private final int playerCount;
+        private final int capacity;
+        private final boolean running;
+        private final boolean selecting;
+        private final boolean matchActive;
+
+        private ArenaStatus(String arenaName, boolean complete, int playerCount, int capacity,
+                             boolean running, boolean selecting, boolean matchActive) {
+            this.arenaName = arenaName;
+            this.complete = complete;
+            this.playerCount = playerCount;
+            this.capacity = capacity;
+            this.running = running;
+            this.selecting = selecting;
+            this.matchActive = matchActive;
+        }
+
+        private static ArenaStatus unavailable(String arenaName) {
+            return new ArenaStatus(arenaName, false, 0, -1, false, false, false);
+        }
+
+        public String getArenaName() {
+            return arenaName;
+        }
+
+        public boolean isComplete() {
+            return complete;
+        }
+
+        public int getPlayerCount() {
+            return playerCount;
+        }
+
+        public int getCapacity() {
+            return capacity;
+        }
+
+        public boolean hasCapacityLimit() {
+            return capacity >= 0;
+        }
+
+        public boolean isRunning() {
+            return running;
+        }
+
+        public boolean isSelecting() {
+            return selecting;
+        }
+
+        public boolean isMatchActive() {
+            return matchActive;
+        }
+
+        public boolean isBusy() {
+            return running || selecting || matchActive;
+        }
     }
 
     private static class ActiveArena {
