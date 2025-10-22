@@ -21,6 +21,8 @@ public class SetupSession {
     private Location beastSpawn;
     private Integer runnerWallDelaySeconds;
     private Integer beastReleaseDelaySeconds;
+    private Integer minRunners;
+    private Integer maxRunners;
 
     public SetupSession(UUID playerId, String arenaName) {
         this.playerId = playerId;
@@ -89,6 +91,14 @@ public class SetupSession {
         this.beastReleaseDelaySeconds = seconds;
     }
 
+    public void setMinRunners(int minRunners) {
+        this.minRunners = minRunners;
+    }
+
+    public void setMaxRunners(int maxRunners) {
+        this.maxRunners = maxRunners;
+    }
+
     public Location getRunnerWallPos1() {
         return runnerWallPos1;
     }
@@ -125,6 +135,14 @@ public class SetupSession {
         return beastReleaseDelaySeconds;
     }
 
+    public Integer getMinRunners() {
+        return minRunners;
+    }
+
+    public Integer getMaxRunners() {
+        return maxRunners;
+    }
+
     public boolean hasRunnerWallSelection() {
         return runnerWallPos1 != null && runnerWallPos2 != null;
     }
@@ -149,6 +167,8 @@ public class SetupSession {
                 .beastSpawn(beastSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+        .minRunners(minRunners)
+        .maxRunners(maxRunners)
                 .build();
     }
 
@@ -159,6 +179,8 @@ public class SetupSession {
                 && runnerSpawn != null
                 && beastSpawn != null
                 && runnerWallDelaySeconds != null
-                && beastReleaseDelaySeconds != null;
+        && beastReleaseDelaySeconds != null
+        && minRunners != null
+        && maxRunners != null;
     }
 }

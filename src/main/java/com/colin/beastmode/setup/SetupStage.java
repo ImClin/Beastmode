@@ -9,6 +9,8 @@ public enum SetupStage {
     BEAST_SPAWN,
     RUNNER_WALL_DELAY,
     BEAST_RELEASE_DELAY,
+    MIN_RUNNERS,
+    MAX_RUNNERS,
     FINISH_BUTTON,
     COMPLETE;
 
@@ -25,7 +27,10 @@ public enum SetupStage {
     }
 
     public boolean expectsChatNumber() {
-        return this == RUNNER_WALL_DELAY || this == BEAST_RELEASE_DELAY;
+        return switch (this) {
+            case RUNNER_WALL_DELAY, BEAST_RELEASE_DELAY, MIN_RUNNERS, MAX_RUNNERS -> true;
+            default -> false;
+        };
     }
 
     public String getFriendlyDescription() {
@@ -38,6 +43,8 @@ public enum SetupStage {
             case BEAST_SPAWN -> "Stand at the beast spawn and run /beastmode setspawn <arena> beast.";
             case RUNNER_WALL_DELAY -> "Type in chat how many seconds until the runner wall opens after the game starts.";
             case BEAST_RELEASE_DELAY -> "Type in chat how many seconds after the runner starts the beast wall should open.";
+            case MIN_RUNNERS -> "Type in chat the minimum number of runners required (at least 1).";
+            case MAX_RUNNERS -> "Type in chat the maximum number of runners (0 for no limit).";
             case FINISH_BUTTON -> "Click the finish button with the setup wand.";
             default -> "Setup is complete.";
         };

@@ -28,6 +28,8 @@ public class SetupSessionManager {
     private final NamespacedKey wandKey;
     private final String prefix;
     private static final String SAME_WORLD_MESSAGE = "Both corners must be in the same world.";
+    private static final int MIN_RUNNER_REQUIREMENT = 1;
+    private static final int RUNNER_LIMIT_CAP = 100;
 
     public SetupSessionManager(Beastmode plugin, ArenaStorage arenaStorage) {
         this.arenaStorage = arenaStorage;
@@ -200,6 +202,8 @@ public class SetupSessionManager {
             return true;
         }
 
+        ArenaDefinition arena = arenaStorage.getArena(session.getArenaName());
+
         switch (stage) {
             case RUNNER_WALL_DELAY -> {
                 session.setRunnerWallDelaySeconds(value);
@@ -218,6 +222,64 @@ public class SetupSessionManager {
                 if (mode == SetupMode.EDIT_BEAST_DELAY) {
                     arenaStorage.updateBeastReleaseDelay(session.getArenaName(), value);
                     finishEdit(player, session, ChatColor.GREEN + "Beast release delay updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
+                advanceStage(session, SetupStage.MIN_RUNNERS);
+            }
+            case MIN_RUNNERS -> {
+                if (value < MIN_RUNNER_REQUIREMENT) {
+                    send(player, ChatColor.RED + "Please choose at least " + MIN_RUNNER_REQUIREMENT + " runner." + ChatColor.GRAY + " (Minimum " + MIN_RUNNER_REQUIREMENT + ")");
+                    return true;
+                }
+                if (value > RUNNER_LIMIT_CAP) {
+                    send(player, ChatColor.RED + "That number is too high. Please choose a value up to " + RUNNER_LIMIT_CAP + ".");
+                    return true;
+                }
+                if (mode == SetupMode.EDIT_MIN_RUNNERS && arena != null) {
+                    int currentMax = arena.getMaxRunners();
+                    if (currentMax != 0 && value > currentMax) {
+                        send(player, ChatColor.RED + "Minimum runners cannot exceed the current maximum (" + currentMax + ").");
+                        return true;
+                    }
+                }
+                session.setMinRunners(value);
+                send(player, ChatColor.GREEN + "Minimum runners set to " + value + ".");
+                if (mode == SetupMode.EDIT_MIN_RUNNERS) {
+                    arenaStorage.updateMinRunners(session.getArenaName(), value);
+                    finishEdit(player, session, ChatColor.GREEN + "Minimum runners updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
+                advanceStage(session, SetupStage.MAX_RUNNERS);
+            }
+            case MAX_RUNNERS -> {
+                if (value < 0) {
+                    send(player, ChatColor.RED + "Maximum runners cannot be negative.");
+                    return true;
+                }
+                if (value > RUNNER_LIMIT_CAP && value != 0) {
+                    send(player, ChatColor.RED + "That number is too high. Please choose a value up to " + RUNNER_LIMIT_CAP + ", or 0 for unlimited.");
+                    return true;
+                }
+                Integer minRunners = session.getMinRunners();
+                if (minRunners == null) {
+                    send(player, ChatColor.RED + "Set the minimum runners before the maximum.");
+                    return true;
+                }
+                if (value != 0 && value < minRunners) {
+                    send(player, ChatColor.RED + "Maximum runners must be at least the minimum (" + minRunners + ").");
+                    return true;
+                }
+                session.setMaxRunners(value);
+                if (value == 0) {
+                    send(player, ChatColor.GREEN + "Maximum runners set to unlimited.");
+                } else {
+                    send(player, ChatColor.GREEN + "Maximum runners set to " + value + ".");
+                }
+                if (mode == SetupMode.EDIT_MAX_RUNNERS) {
+                    arenaStorage.updateMaxRunners(session.getArenaName(), value);
+                    finishEdit(player, session, ChatColor.GREEN + "Maximum runners updated for arena "
                             + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
                     return true;
                 }
@@ -365,6 +427,16 @@ public class SetupSessionManager {
                 ChatColor.YELLOW + "Type the new beast release delay in chat." + ChatColor.GRAY + " (or 'cancel')");
     }
 
+    public boolean beginMinRunnerEdit(Player player, String arenaName) {
+        return beginNumericEdit(player, arenaName, SetupMode.EDIT_MIN_RUNNERS, SetupStage.MIN_RUNNERS,
+                ChatColor.YELLOW + "Type the new minimum number of runners (at least 1)." + ChatColor.GRAY + " (or 'cancel')");
+    }
+
+    public boolean beginMaxRunnerEdit(Player player, String arenaName) {
+        return beginNumericEdit(player, arenaName, SetupMode.EDIT_MAX_RUNNERS, SetupStage.MAX_RUNNERS,
+                ChatColor.YELLOW + "Type the new maximum number of runners (0 for unlimited)." + ChatColor.GRAY + " (or 'cancel')");
+    }
+
     private boolean beginSelectionEdit(Player player, String arenaName, SetupMode mode, SetupStage stage, String instruction) {
         ArenaDefinition arena = requireEditableArena(player, arenaName);
         if (arena == null) {
@@ -402,7 +474,30 @@ public class SetupSessionManager {
         SetupSession session = new SetupSession(player.getUniqueId(), arena.getName());
         session.setMode(mode);
         session.setStage(stage);
+        if (stage == SetupStage.MIN_RUNNERS) {
+            session.setMinRunners(arena.getMinRunners());
+            session.setMaxRunners(arena.getMaxRunners());
+        } else if (stage == SetupStage.MAX_RUNNERS) {
+            session.setMinRunners(arena.getMinRunners());
+            session.setMaxRunners(arena.getMaxRunners());
+        }
         sessions.put(player.getUniqueId(), session);
+        int currentValue = switch (stage) {
+            case RUNNER_WALL_DELAY -> arena.getRunnerWallDelaySeconds();
+            case BEAST_RELEASE_DELAY -> arena.getBeastReleaseDelaySeconds();
+            case MIN_RUNNERS -> arena.getMinRunners();
+            case MAX_RUNNERS -> arena.getMaxRunners();
+            default -> -1;
+        };
+        if (currentValue >= 0 && stage != SetupStage.MAX_RUNNERS) {
+            send(player, ChatColor.GRAY + "Current value: " + ChatColor.AQUA + currentValue);
+        } else if (stage == SetupStage.MAX_RUNNERS) {
+            if (currentValue == 0) {
+                send(player, ChatColor.GRAY + "Current value: " + ChatColor.AQUA + "Unlimited");
+            } else if (currentValue > 0) {
+                send(player, ChatColor.GRAY + "Current value: " + ChatColor.AQUA + currentValue);
+            }
+        }
         send(player, instruction);
         return true;
     }

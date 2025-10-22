@@ -57,6 +57,7 @@ public class GameManager {
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
     private static final String DEFAULT_BEAST_NAME = "The Beast";
     private static final int EXIT_TOKEN_SLOT = 8;
+    private static final int LONG_EFFECT_DURATION_TICKS = 20 * 600;
 
     public enum RolePreference {
         ANY,
@@ -107,6 +108,18 @@ public class GameManager {
         if (activeArena.isMatchActive()) {
             send(player, ChatColor.RED + "That arena is already in a hunt. Try again in a moment.");
             return;
+        }
+
+        int queueLimit = getQueueLimit(arena);
+        if (queueLimit != Integer.MAX_VALUE) {
+            int currentSize = activeArena.getPlayerIds().size();
+            if (currentSize >= queueLimit) {
+                int maxRunners = arena.getMaxRunners();
+                String runnerText = formatRunnerCount(maxRunners);
+                send(player, ChatColor.RED + "That arena already has the maximum of "
+                        + ChatColor.AQUA + runnerText + ChatColor.RED + " (plus the Beast). Try again later.");
+                return;
+            }
         }
 
         boolean added = activeArena.addPlayer(player);
@@ -268,6 +281,7 @@ public class GameManager {
                 if (isFinisher) {
                     send(participant, ChatColor.GOLD + "" + ChatColor.BOLD + finisherName + ChatColor.RESET
                             + ChatColor.YELLOW + " finished the parkour and is ready to slay the Beast!");
+                    applyFireResistance(participant);
                     scheduleRunnerReward(participant);
                     continue;
                 }
@@ -280,7 +294,8 @@ public class GameManager {
 
                 send(participant, ChatColor.YELLOW + "You have been removed from the arena while "
                         + ChatColor.AQUA + finisherName + ChatColor.YELLOW + " prepares to fight the Beast.");
-                participant.removePotionEffect(PotionEffectType.SPEED);
+        participant.removePotionEffect(PotionEffectType.SPEED);
+        participant.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
                 resetPlayerLoadout(participant);
                 sendPlayerToSpawn(activeArena, participant);
                 toRemove.add(participant.getUniqueId());
@@ -310,6 +325,7 @@ public class GameManager {
             }
 
             participant.removePotionEffect(PotionEffectType.SPEED);
+            participant.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
             resetPlayerLoadout(participant);
             sendPlayerToSpawn(activeArena, participant);
         }
@@ -324,7 +340,7 @@ public class GameManager {
             participants.add(beast);
         }
 
-    String beastName = beast != null ? beast.getName() : DEFAULT_BEAST_NAME;
+        String beastName = beast != null ? beast.getName() : DEFAULT_BEAST_NAME;
         String title = ChatColor.DARK_RED + "" + ChatColor.BOLD + "Beast Victory!";
         String subtitle = ChatColor.RED + beastName + ChatColor.GRAY + " eliminated everyone.";
 
@@ -333,8 +349,9 @@ public class GameManager {
             participant.playSound(participant.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 0.8f);
             send(participant, ChatColor.DARK_RED + "" + ChatColor.BOLD + "The Beast prevailed! "
                     + ChatColor.RESET + ChatColor.RED + beastName + ChatColor.GRAY + " cleared the arena.");
+            participant.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
             resetPlayerLoadout(participant);
-        sendPlayerToSpawn(activeArena, participant);
+            sendPlayerToSpawn(activeArena, participant);
         }
 
         cleanupArena(key, activeArena);
@@ -413,9 +430,10 @@ public class GameManager {
                 cleanupArena(key, activeArena);
                 return;
             }
-            if (remaining.size() < 2 && activeArena.isSelecting()) {
+            int missing = getMissingParticipantsCount(remaining.size(), activeArena.getArena());
+            if (missing > 0 && activeArena.isSelecting()) {
                 activeArena.setSelecting(false);
-                notifyWaitingForPlayers(remaining);
+                notifyWaitingForPlayers(activeArena, remaining);
             }
             return;
         }
@@ -472,9 +490,12 @@ public class GameManager {
             List<Player> remaining = collectParticipants(activeArena);
             if (remaining.isEmpty()) {
                 cleanupArena(key, activeArena);
-            } else if (remaining.size() < 2 && activeArena.isSelecting()) {
-                activeArena.setSelecting(false);
-                notifyWaitingForPlayers(remaining);
+            } else {
+                int missing = getMissingParticipantsCount(remaining.size(), activeArena.getArena());
+                if (missing > 0 && activeArena.isSelecting()) {
+                    activeArena.setSelecting(false);
+                    notifyWaitingForPlayers(activeArena, remaining);
+                }
             }
             sendPlayerToSpawn(activeArena, player);
             send(player, ChatColor.YELLOW + "You left the hunt.");
@@ -562,6 +583,7 @@ public class GameManager {
         }
 
         removeExitToken(player);
+        player.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
 
         forceRespawn(player, () -> {
             player.setGameMode(GameMode.ADVENTURE);
@@ -588,6 +610,7 @@ public class GameManager {
                 player.teleport(destination);
             }
             removeExitToken(player);
+            player.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
             applySpectatorState(activeArena, player);
             Bukkit.getScheduler().runTaskLater(plugin, () -> applySpectatorState(activeArena, player), 2L);
         });
@@ -686,6 +709,10 @@ public class GameManager {
         return null;
     }
 
+    public boolean isPlayerInArena(UUID uuid) {
+        return uuid != null && findArenaByPlayer(uuid) != null;
+    }
+
     private void startMatch(String key, ActiveArena activeArena) {
         if (activeArena.isRunning() || activeArena.isSelecting() || activeArena.isMatchActive()) {
             return;
@@ -763,9 +790,11 @@ public class GameManager {
             return;
         }
 
-        if (participants.size() < 2) {
+        ArenaDefinition arena = activeArena.getArena();
+        int required = getRequiredParticipants(arena);
+        if (participants.size() < required) {
             activeArena.setSelecting(false);
-            notifyWaitingForPlayers(participants);
+            notifyWaitingForPlayers(activeArena, participants);
             return;
         }
 
@@ -778,14 +807,23 @@ public class GameManager {
         countdown.start();
     }
 
-    private void notifyWaitingForPlayers(List<Player> participants) {
-        if (participants.isEmpty()) {
+    private void notifyWaitingForPlayers(ActiveArena activeArena, List<Player> participants) {
+        if (participants.isEmpty() || activeArena == null) {
             return;
         }
+        ArenaDefinition arena = activeArena.getArena();
+        int missing = getMissingParticipantsCount(participants.size(), arena);
+        if (missing <= 0) {
+            return;
+        }
+        int minRunners = Math.max(arena != null ? arena.getMinRunners() : 1, 1);
+        String missingText = formatPlayerCount(missing);
+        String runnerText = formatRunnerCount(minRunners);
         for (Player player : participants) {
-            send(player, ChatColor.YELLOW + "Waiting for one more player...");
+            send(player, ChatColor.YELLOW + "Waiting for " + ChatColor.AQUA + missingText + ChatColor.YELLOW
+            + " (need at least " + ChatColor.AQUA + runnerText + ChatColor.YELLOW + " plus the Beast).");
             player.sendTitle(ChatColor.YELLOW + "" + ChatColor.BOLD + "Waiting...",
-                    ChatColor.GRAY + "Need 1 more player to begin.", 10, 40, 10);
+                    ChatColor.GRAY + "Need " + missingText + " to begin.", 10, 40, 10);
         }
     }
 
@@ -829,10 +867,10 @@ public class GameManager {
         @Override
         public void run() {
             List<Player> current = collectParticipants(activeArena);
-            if (current.size() < 2) {
+            if (current.size() < getRequiredParticipants(activeArena.getArena())) {
                 cancel();
                 activeArena.setSelecting(false);
-                notifyWaitingForPlayers(current);
+                notifyWaitingForPlayers(activeArena, current);
                 return;
             }
 
@@ -889,10 +927,10 @@ public class GameManager {
         @Override
         public void run() {
             List<Player> current = collectParticipants(activeArena);
-            if (current.size() < 2) {
+            if (current.size() < getRequiredParticipants(activeArena.getArena())) {
                 cancel();
                 activeArena.setSelecting(false);
-                notifyWaitingForPlayers(current);
+                notifyWaitingForPlayers(activeArena, current);
                 return;
             }
 
@@ -1186,7 +1224,7 @@ public class GameManager {
         };
 
         if (beastDelay <= 0) {
-            applyBeastSpeed(activeArena, beast);
+            applyBeastReleaseEffects(activeArena, beast);
             beastOpenAction.run();
             return;
         }
@@ -1198,19 +1236,28 @@ public class GameManager {
                 (players, seconds) -> {
                     announceBeastCountdown(players, seconds, beast);
                     if (seconds == 1) {
-                        applyBeastSpeed(activeArena, beast);
+                        applyBeastReleaseEffects(activeArena, beast);
                     }
                 },
                 beastOpenAction);
     }
 
-    private void applyBeastSpeed(ActiveArena activeArena, Player beast) {
+    private void applyBeastReleaseEffects(ActiveArena activeArena, Player beast) {
         if (beast == null || !beast.isOnline()) {
             return;
         }
-        PotionEffect effect = new PotionEffect(PotionEffectType.SPEED, 20 * 600, 0, false, false, true);
-        beast.addPotionEffect(effect);
+        PotionEffect speed = new PotionEffect(PotionEffectType.SPEED, LONG_EFFECT_DURATION_TICKS, 0, false, false, true);
+        beast.addPotionEffect(speed);
+        applyFireResistance(beast);
         activeArena.setBeastId(beast.getUniqueId());
+    }
+
+    private void applyFireResistance(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        PotionEffect fireResistance = new PotionEffect(PotionEffectType.FIRE_RESISTANCE, LONG_EFFECT_DURATION_TICKS, 0, false, false, true);
+        player.addPotionEffect(fireResistance);
     }
 
     private void openRunnerGate(ActiveArena activeArena, ArenaDefinition arena) {
@@ -1366,6 +1413,38 @@ public class GameManager {
         for (Player player : players) {
             send(player, message);
         }
+    }
+
+    private int getQueueLimit(ArenaDefinition arena) {
+        if (arena == null) {
+            return Integer.MAX_VALUE;
+        }
+        int maxRunners = arena.getMaxRunners();
+        if (maxRunners <= 0) {
+            return Integer.MAX_VALUE;
+        }
+        return Math.max(maxRunners + 1, 1);
+    }
+
+    private int getRequiredParticipants(ArenaDefinition arena) {
+        if (arena == null) {
+            return 2;
+        }
+        int minRunners = Math.max(arena.getMinRunners(), 1);
+        return Math.max(minRunners + 1, 2);
+    }
+
+    private int getMissingParticipantsCount(int participantCount, ArenaDefinition arena) {
+        int required = getRequiredParticipants(arena);
+        return Math.max(0, required - participantCount);
+    }
+
+    private String formatPlayerCount(int count) {
+        return count + " more player" + (count == 1 ? "" : "s");
+    }
+
+    private String formatRunnerCount(int count) {
+        return count + " runner" + (count == 1 ? "" : "s");
     }
 
     private String formatSeconds(int seconds) {
@@ -1700,6 +1779,7 @@ public class GameManager {
         Player beast = Bukkit.getPlayer(beastId);
         if (beast != null) {
             beast.removePotionEffect(PotionEffectType.SPEED);
+            beast.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
         }
     }
 

@@ -1,8 +1,14 @@
 package com.colin.beastmode.listeners;
 
 import com.colin.beastmode.game.GameManager;
+import org.bukkit.ChatColor;
+import org.bukkit.block.Block;
+import org.bukkit.block.Sign;
+import org.bukkit.block.sign.Side;
+import org.bukkit.block.sign.SignSide;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -10,13 +16,12 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.block.Block;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 
@@ -57,31 +62,48 @@ public class GameListener implements Listener {
         gameManager.handlePlayerJoin(event.getPlayer());
     }
     
-    @EventHandler(ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerInteract(PlayerInteractEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND) {
+        Player player = event.getPlayer();
+        EquipmentSlot hand = event.getHand();
+
+        ItemStack main = player.getInventory().getItemInMainHand();
+        ItemStack off = player.getInventory().getItemInOffHand();
+
+        boolean usingExitToken = false;
+        if (hand == EquipmentSlot.HAND) {
+            usingExitToken = gameManager.isExitToken(main);
+        } else if (hand == EquipmentSlot.OFF_HAND) {
+            usingExitToken = gameManager.isExitToken(off);
+        } else {
+            usingExitToken = gameManager.isExitToken(main) || gameManager.isExitToken(off);
+        }
+
+        boolean inArena = gameManager.isPlayerInArena(player.getUniqueId());
+        Block clickedBlock = event.getClickedBlock();
+
+        if (usingExitToken && inArena) {
+            if (event.getAction() == Action.RIGHT_CLICK_BLOCK && isJoinSign(clickedBlock)) {
+                // Allow the join sign to process without triggering the exit token.
+            } else {
+                event.setCancelled(true);
+                gameManager.handleSpawnCommand(player);
+                return;
+            }
+        }
+
+        if (hand == EquipmentSlot.OFF_HAND) {
             return;
         }
 
-        ItemStack usedItem = event.getItem();
-        if (usedItem == null) {
-            usedItem = event.getPlayer().getInventory().getItemInMainHand();
-        }
-
-        if (usedItem != null && gameManager.isExitToken(usedItem)) {
-            event.setCancelled(true);
-            gameManager.handleSpawnCommand(event.getPlayer());
-            return;
-        }
         Action action = event.getAction();
         if (action != Action.RIGHT_CLICK_BLOCK && action != Action.LEFT_CLICK_BLOCK) {
             return;
         }
-        Block block = event.getClickedBlock();
-        if (block == null) {
+        if (clickedBlock == null) {
             return;
         }
-        gameManager.handlePlayerInteract(event.getPlayer(), block);
+        gameManager.handlePlayerInteract(player, clickedBlock);
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -150,5 +172,20 @@ public class GameListener implements Listener {
                 return;
             }
         }
+    }
+
+    private boolean isJoinSign(Block block) {
+        if (block == null) {
+            return false;
+        }
+        if (!(block.getState() instanceof Sign sign)) {
+            return false;
+        }
+        SignSide front = sign.getSide(Side.FRONT);
+        String header = front.getLine(0);
+        if (header == null) {
+            return false;
+        }
+        return ChatColor.stripColor(header).equalsIgnoreCase("[beastmode]");
     }
 }

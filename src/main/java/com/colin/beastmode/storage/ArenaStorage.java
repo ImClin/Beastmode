@@ -63,6 +63,16 @@ public class ArenaStorage {
         Location waitingSpawn = readLocation(section.getConfigurationSection("waitingSpawn"));
             int runnerDelay = section.getInt("runnerWallDelaySeconds", -1);
             int beastDelay = section.getInt("beastReleaseDelaySeconds", -1);
+        int minRunners = Math.max(section.getInt("minRunners", 1), 1);
+        int maxRunners = section.getInt("maxRunners", 0);
+        if (maxRunners < 0) {
+        maxRunners = 0;
+        }
+        if (maxRunners > 0 && maxRunners < minRunners) {
+        logger.log(Level.WARNING, "Arena {0} has maxRunners {1} smaller than minRunners {2}; clamping to match minimum.",
+            new Object[]{key, maxRunners, minRunners});
+        maxRunners = minRunners;
+        }
 
             ArenaDefinition arena = ArenaDefinition.builder(key)
                     .runnerWall(runnerWall)
@@ -74,6 +84,8 @@ public class ArenaStorage {
             .waitingSpawn(waitingSpawn)
                     .runnerWallDelaySeconds(runnerDelay)
                     .beastReleaseDelaySeconds(beastDelay)
+            .minRunners(minRunners)
+            .maxRunners(maxRunners)
                     .build();
             arenas.put(key.toLowerCase(), arena);
         }
@@ -94,6 +106,8 @@ public class ArenaStorage {
     writeLocation(section.createSection("waitingSpawn"), arena.getWaitingSpawn());
         section.set("runnerWallDelaySeconds", arena.getRunnerWallDelaySeconds());
         section.set("beastReleaseDelaySeconds", arena.getBeastReleaseDelaySeconds());
+    section.set("minRunners", arena.getMinRunners());
+    section.set("maxRunners", arena.getMaxRunners());
 
         plugin.saveConfig();
         reload();
@@ -156,6 +170,24 @@ public class ArenaStorage {
             return;
         }
         ArenaDefinition updated = arena.withBeastReleaseDelay(seconds);
+        saveArena(updated);
+    }
+
+    public void updateMinRunners(String arenaName, int minRunners) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withMinRunners(minRunners);
+        saveArena(updated);
+    }
+
+    public void updateMaxRunners(String arenaName, int maxRunners) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withMaxRunners(maxRunners);
         saveArena(updated);
     }
 

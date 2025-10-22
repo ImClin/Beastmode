@@ -49,10 +49,14 @@ public class ArenaEditMenu {
         inventory.setItem(12, waitingSpawnItem(arena));
         inventory.setItem(13, runnerWallItem());
         inventory.setItem(14, beastWallItem());
-        inventory.setItem(15, finishButtonItem(arena));
-        inventory.setItem(16, runnerDelayItem(arena));
-        inventory.setItem(17, beastDelayItem(arena));
-        inventory.setItem(22, reconfigureItem());
+
+        inventory.setItem(19, finishButtonItem(arena));
+        inventory.setItem(20, runnerDelayItem(arena));
+        inventory.setItem(21, beastDelayItem(arena));
+        inventory.setItem(22, minRunnersItem(arena));
+        inventory.setItem(23, maxRunnersItem(arena));
+
+        inventory.setItem(24, reconfigureItem());
         inventory.setItem(26, closeItem());
 
         player.openInventory(inventory);
@@ -92,6 +96,8 @@ public class ArenaEditMenu {
             case STONE_BUTTON, POLISHED_BLACKSTONE_BUTTON -> handleFinishButton(player, arena);
             case REPEATER -> handleRunnerDelay(player, arena);
             case COMPARATOR -> handleBeastDelay(player, arena);
+            case SLIME_BALL -> handleMinRunners(player, arena);
+            case MAGMA_CREAM -> handleMaxRunners(player, arena);
             case WRITABLE_BOOK -> handleReconfigure(player, arena);
             case BARRIER -> player.closeInventory();
             default -> {
@@ -184,6 +190,20 @@ public class ArenaEditMenu {
         return simpleItem(Material.COMPARATOR, ChatColor.DARK_RED + "Beast Release Delay",
                 ChatColor.GRAY + "Current: " + ChatColor.AQUA + value,
                 ChatColor.YELLOW + "Click and enter a new value in chat.");
+    }
+
+    private ItemStack minRunnersItem(ArenaDefinition arena) {
+        String value = String.valueOf(arena.getMinRunners());
+        return simpleItem(Material.SLIME_BALL, ChatColor.GREEN + "Minimum Runners",
+                ChatColor.GRAY + "Current: " + ChatColor.AQUA + value,
+                ChatColor.YELLOW + "Click and enter a new value in chat." + ChatColor.GRAY + " (>= 1)");
+    }
+
+    private ItemStack maxRunnersItem(ArenaDefinition arena) {
+        String value = arena.getMaxRunners() == 0 ? "Unlimited" : String.valueOf(arena.getMaxRunners());
+        return simpleItem(Material.MAGMA_CREAM, ChatColor.GOLD + "Maximum Runners",
+                ChatColor.GRAY + "Current: " + ChatColor.AQUA + value,
+                ChatColor.YELLOW + "Click and enter a new value in chat." + ChatColor.GRAY + " (0 = unlimited)");
     }
 
     private ItemStack reconfigureItem() {
@@ -282,6 +302,20 @@ public class ArenaEditMenu {
         player.closeInventory();
         if (sessionManager.beginBeastDelayEdit(player, arena.getName())) {
             player.sendMessage(prefix + ChatColor.YELLOW + "Enter the new beast release delay in chat.");
+        }
+    }
+
+    private void handleMinRunners(Player player, ArenaDefinition arena) {
+        player.closeInventory();
+        if (sessionManager.beginMinRunnerEdit(player, arena.getName())) {
+            player.sendMessage(prefix + ChatColor.YELLOW + "Enter the new minimum runner count in chat.");
+        }
+    }
+
+    private void handleMaxRunners(Player player, ArenaDefinition arena) {
+        player.closeInventory();
+        if (sessionManager.beginMaxRunnerEdit(player, arena.getName())) {
+            player.sendMessage(prefix + ChatColor.YELLOW + "Enter the new maximum runner count in chat (0 = unlimited).");
         }
     }
 

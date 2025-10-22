@@ -15,18 +15,26 @@ public class ArenaDefinition {
     private final int beastReleaseDelaySeconds;
     private final Location finishButton;
     private final Cuboid finishRegion;
+    private final int minRunners;
+    private final int maxRunners;
 
     private ArenaDefinition(Builder builder) {
         this.name = builder.name;
         this.runnerWall = builder.runnerWall;
         this.beastWall = builder.beastWall;
-    this.runnerSpawn = builder.runnerSpawn;
-    this.beastSpawn = builder.beastSpawn;
-    this.waitingSpawn = builder.waitingSpawn;
-    this.runnerWallDelaySeconds = builder.runnerWallDelaySeconds;
-    this.beastReleaseDelaySeconds = builder.beastReleaseDelaySeconds;
-    this.finishButton = builder.finishButton;
-    this.finishRegion = builder.finishRegion;
+        this.runnerSpawn = builder.runnerSpawn;
+        this.beastSpawn = builder.beastSpawn;
+        this.waitingSpawn = builder.waitingSpawn;
+        this.runnerWallDelaySeconds = builder.runnerWallDelaySeconds;
+        this.beastReleaseDelaySeconds = builder.beastReleaseDelaySeconds;
+        this.finishButton = builder.finishButton;
+        this.finishRegion = builder.finishRegion;
+        this.minRunners = Math.max(builder.minRunners, 1);
+        int sanitizedMax = Math.max(builder.maxRunners, 0);
+        if (sanitizedMax > 0 && sanitizedMax < this.minRunners) {
+            sanitizedMax = this.minRunners;
+        }
+        this.maxRunners = sanitizedMax;
     }
 
     public String getName() {
@@ -65,10 +73,21 @@ public class ArenaDefinition {
         return finishButton != null ? finishButton.clone() : null;
     }
 
+    public int getMinRunners() {
+        return Math.max(minRunners, 1);
+    }
+
+    public int getMaxRunners() {
+        return Math.max(maxRunners, 0);
+    }
+
     public boolean isComplete() {
         return runnerWall != null && beastWall != null && (finishButton != null || finishRegion != null)
                 && runnerSpawn != null && beastSpawn != null
-                && runnerWallDelaySeconds >= 0 && beastReleaseDelaySeconds >= 0;
+                && runnerWallDelaySeconds >= 0 && beastReleaseDelaySeconds >= 0
+                && minRunners >= 1
+                && maxRunners >= 0
+                && (maxRunners == 0 || maxRunners >= minRunners);
     }
 
     @Override
@@ -96,13 +115,15 @@ public class ArenaDefinition {
         private final String name;
         private Cuboid runnerWall;
         private Cuboid beastWall;
-    private Location runnerSpawn;
-    private Location beastSpawn;
-    private Location waitingSpawn;
-    private int runnerWallDelaySeconds = -1;
-    private int beastReleaseDelaySeconds = -1;
-    private Location finishButton;
-    private Cuboid finishRegion;
+        private Location runnerSpawn;
+        private Location beastSpawn;
+        private Location waitingSpawn;
+        private int runnerWallDelaySeconds = -1;
+        private int beastReleaseDelaySeconds = -1;
+        private Location finishButton;
+        private Cuboid finishRegion;
+        private int minRunners = 1;
+        private int maxRunners = 0;
 
         public Builder(String name) {
             this.name = name;
@@ -153,6 +174,16 @@ public class ArenaDefinition {
             return this;
         }
 
+        public Builder minRunners(int minRunners) {
+            this.minRunners = minRunners;
+            return this;
+        }
+
+        public Builder maxRunners(int maxRunners) {
+            this.maxRunners = maxRunners;
+            return this;
+        }
+
         public ArenaDefinition build() {
             return new ArenaDefinition(this);
         }
@@ -169,6 +200,8 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
@@ -183,6 +216,8 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
@@ -197,6 +232,8 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
@@ -211,6 +248,8 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
@@ -225,6 +264,8 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
@@ -239,6 +280,8 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
@@ -253,6 +296,8 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(seconds)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
@@ -267,6 +312,40 @@ public class ArenaDefinition {
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .finishButton(location != null ? location.clone() : null)
                 .finishRegion(null)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
+                .build();
+    }
+
+    public ArenaDefinition withMinRunners(int value) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .minRunners(value)
+                .maxRunners(maxRunners)
+                .build();
+    }
+
+    public ArenaDefinition withMaxRunners(int value) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(value)
                 .build();
     }
 
