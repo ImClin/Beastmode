@@ -10,32 +10,23 @@ import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Registry;
 import org.bukkit.Sound;
 import org.bukkit.World;
-import org.bukkit.attribute.Attribute;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.PlayerInventory;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
-import org.bukkit.potion.PotionType;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -58,15 +49,16 @@ public class GameManager {
     private final NamespacedKey preferenceKey;
     private final ItemStack exitTokenTemplate;
     private final List<Consumer<String>> statusListeners = new CopyOnWriteArrayList<>();
+    private final PlayerSupportService playerSupport;
     private static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     private static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
     private static final String PERM_PREFERENCE_VIP = "beastmode.preference.vip";
     private static final String PERM_PREFERENCE_NJOG = "beastmode.preference.njog";
     private static final String DEFAULT_BEAST_NAME = "The Beast";
-    private static final int EXIT_TOKEN_SLOT = 8;
-    private static final int PREFERENCE_BEAST_SLOT = 0;
-    private static final int PREFERENCE_RUNNER_SLOT = 1;
+    static final int EXIT_TOKEN_SLOT = 8;
+    static final int PREFERENCE_BEAST_SLOT = 0;
+    static final int PREFERENCE_RUNNER_SLOT = 1;
     private static final int LONG_EFFECT_DURATION_TICKS = 20 * 600;
 
     public enum RolePreference {
@@ -82,6 +74,8 @@ public class GameManager {
         this.exitTokenKey = new NamespacedKey(plugin, "exit_token");
         this.preferenceKey = new NamespacedKey(plugin, "preference_selector");
         this.exitTokenTemplate = createExitToken();
+    this.playerSupport = new PlayerSupportService(plugin, prefix, LONG_EFFECT_DURATION_TICKS,
+        exitTokenKey, preferenceKey, exitTokenTemplate);
     }
 
     public void registerStatusListener(Consumer<String> listener) {
@@ -178,20 +172,20 @@ public class GameManager {
                 send(player, ChatColor.YELLOW + "You are already in the queue for this arena.");
             }
             if (canChoosePreference(player)) {
-                givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
+                playerSupport.givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
             } else {
-                clearPreferenceSelectors(player);
+                playerSupport.clearPreferenceSelectors(player);
             }
             notifyArenaStatus(activeArena);
             return;
         }
 
-        resetPlayerLoadout(player);
+    playerSupport.resetLoadout(player);
         if (!activeArena.isMatchActive()) {
             giveExitToken(player);
         }
         if (canChoosePreference(player)) {
-            givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
+            playerSupport.givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
         }
 
         send(player, ChatColor.GREEN + "Joined arena " + ChatColor.AQUA + arena.getName() + ChatColor.GREEN + ".");
@@ -211,16 +205,6 @@ public class GameManager {
         }
         startMatch(key, activeArena);
         notifyArenaStatus(activeArena);
-    }
-
-    private void resetPlayerLoadout(Player player) {
-        if (player == null) {
-            return;
-        }
-        PlayerInventory inventory = player.getInventory();
-        inventory.clear();
-        inventory.setArmorContents(null);
-        inventory.setItemInOffHand(null);
     }
 
     public void handlePlayerMove(Player player, Location from, Location to) {
@@ -301,6 +285,52 @@ public class GameManager {
         completeRunnerVictory(key, activeArena, player);
     }
 
+    public void handlePlayerDeath(Player player) {
+        if (player == null) {
+            return;
+        }
+
+        UUID uuid = player.getUniqueId();
+        String key = findArenaByPlayer(uuid);
+        if (key == null) {
+            return;
+        }
+
+        ActiveArena activeArena = activeArenas.get(key);
+        if (activeArena == null) {
+            return;
+        }
+
+        if (!activeArena.isMatchActive()) {
+            sendPlayerToSpawn(activeArena, player);
+            return;
+        }
+
+        Location deathLocation = player.getLocation() != null ? player.getLocation().clone() : null;
+        boolean wasRunner = activeArena.isRunner(uuid);
+        if (wasRunner) {
+            if (!activeArena.removeRunner(uuid)) {
+                return;
+            }
+
+            playerSupport.resetLoadout(player);
+            boolean finished = handleRunnerElimination(key, activeArena, player);
+            if (!finished) {
+                sendToSpectator(activeArena, player, deathLocation);
+            }
+            return;
+        }
+
+        UUID beastId = activeArena.getBeastId();
+        if (beastId != null && beastId.equals(uuid)) {
+            playerSupport.resetLoadout(player);
+            if (!activeArena.isFinalPhase()) {
+                activeArena.setRewardSuppressed(true);
+            }
+            completeRunnerVictory(key, activeArena, null);
+        }
+    }
+
     private void completeRunnerVictory(String key, ActiveArena activeArena, Player finisher) {
         if (activeArena == null) {
             return;
@@ -343,8 +373,8 @@ public class GameManager {
                 if (isFinisher) {
                     send(participant, ChatColor.GOLD + "" + ChatColor.BOLD + finisherName + ChatColor.RESET
                             + ChatColor.YELLOW + " finished the parkour and is ready to slay the Beast!");
-                    applyFireResistance(participant);
-                    scheduleRunnerReward(participant);
+                    playerSupport.applyFireResistance(participant);
+                    playerSupport.scheduleRunnerReward(participant);
                     continue;
                 }
 
@@ -362,7 +392,7 @@ public class GameManager {
 
         boolean finalPhase = activeArena.isFinalPhase();
         activeArena.setMatchActive(false);
-    notifyArenaStatus(activeArena);
+        notifyArenaStatus(activeArena);
 
         String title = ChatColor.GREEN + "" + ChatColor.BOLD + "Runner Victory!";
         String subtitle = finalPhase
@@ -375,12 +405,12 @@ public class GameManager {
             participant.playSound(participant.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
 
             if (isRunner && !finalPhase && !activeArena.isRewardSuppressed()) {
-                scheduleRunnerReward(participant);
+                playerSupport.scheduleRunnerReward(participant);
             }
 
             participant.removePotionEffect(PotionEffectType.SPEED);
             participant.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
-            resetPlayerLoadout(participant);
+            playerSupport.resetLoadout(participant);
             sendPlayerToSpawn(activeArena, participant);
         }
 
@@ -411,8 +441,8 @@ public class GameManager {
                 participant.playSound(participant.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
                 send(participant, ChatColor.GOLD + "" + ChatColor.BOLD + "Locked and loaded! "
                         + ChatColor.RESET + ChatColor.GOLD + "Help slay the Beast.");
-                applyFireResistance(participant);
-                scheduleRunnerReward(participant);
+                playerSupport.applyFireResistance(participant);
+                playerSupport.scheduleRunnerReward(participant);
                 continue;
             }
 
@@ -444,57 +474,11 @@ public class GameManager {
             send(participant, ChatColor.DARK_RED + "" + ChatColor.BOLD + "The Beast prevailed! "
                     + ChatColor.RESET + ChatColor.RED + beastName + ChatColor.GRAY + " cleared the arena.");
             participant.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
-            resetPlayerLoadout(participant);
+            playerSupport.resetLoadout(participant);
             sendPlayerToSpawn(activeArena, participant);
         }
 
         cleanupArena(key, activeArena);
-    }
-
-    public void handlePlayerDeath(Player player) {
-        if (player == null) {
-            return;
-        }
-
-        UUID uuid = player.getUniqueId();
-        String key = findArenaByPlayer(uuid);
-        if (key == null) {
-            return;
-        }
-
-        ActiveArena activeArena = activeArenas.get(key);
-        if (activeArena == null) {
-            return;
-        }
-
-        if (!activeArena.isMatchActive()) {
-            sendPlayerToSpawn(activeArena, player);
-            return;
-        }
-
-        Location deathLocation = player.getLocation() != null ? player.getLocation().clone() : null;
-
-        if (activeArena.isRunner(uuid)) {
-            if (!activeArena.removeRunner(uuid)) {
-                return;
-            }
-            resetPlayerLoadout(player);
-            boolean matchEnded = handleRunnerElimination(key, activeArena, player);
-            if (matchEnded) {
-                return;
-            }
-            sendToSpectator(activeArena, player, deathLocation);
-            return;
-        }
-
-        UUID beastId = activeArena.getBeastId();
-        if (beastId != null && beastId.equals(uuid)) {
-            resetPlayerLoadout(player);
-            if (!activeArena.isFinalPhase()) {
-                activeArena.setRewardSuppressed(true);
-            }
-            completeRunnerVictory(key, activeArena, null);
-        }
     }
 
     public void handlePlayerQuit(Player player) {
@@ -513,14 +497,17 @@ public class GameManager {
             return;
         }
 
-    boolean wasRunner = activeArena.isRunner(uuid);
-    boolean wasBeast = activeArena.getBeastId() != null && activeArena.getBeastId().equals(uuid);
-    resetPlayerLoadout(player);
-    player.setGameMode(GameMode.ADVENTURE);
-    activeArena.removePlayer(uuid);
-    pendingSpawnTeleports.add(uuid);
-    removeExitToken(player);
-    notifyArenaStatus(activeArena);
+        boolean wasRunner = activeArena.isRunner(uuid);
+        boolean wasBeast = activeArena.getBeastId() != null && activeArena.getBeastId().equals(uuid);
+
+        playerSupport.resetLoadout(player);
+        playerSupport.restoreVitals(player);
+        player.setGameMode(GameMode.ADVENTURE);
+
+        activeArena.removePlayer(uuid);
+        pendingSpawnTeleports.add(uuid);
+        removeExitToken(player);
+        notifyArenaStatus(activeArena);
 
         if (!activeArena.isMatchActive()) {
             List<Player> remaining = collectParticipants(activeArena);
@@ -580,11 +567,11 @@ public class GameManager {
         boolean wasRunner = activeArena.isRunner(uuid);
         boolean wasBeast = activeArena.getBeastId() != null && activeArena.getBeastId().equals(uuid);
 
-        resetPlayerLoadout(player);
+        playerSupport.resetLoadout(player);
         player.setGameMode(GameMode.ADVENTURE);
         activeArena.removePlayer(uuid);
-    removeExitToken(player);
-    notifyArenaStatus(activeArena);
+        removeExitToken(player);
+        notifyArenaStatus(activeArena);
 
         if (!activeArena.isMatchActive()) {
             List<Player> remaining = collectParticipants(activeArena);
@@ -688,7 +675,7 @@ public class GameManager {
 
         forceRespawn(player, () -> {
             player.setGameMode(GameMode.ADVENTURE);
-            restorePlayerVitals(player);
+            playerSupport.restoreVitals(player);
             Location globalSpawn = Bukkit.getWorlds().isEmpty() ? null : Bukkit.getWorlds().get(0).getSpawnLocation();
             if (globalSpawn != null) {
                 player.teleport(globalSpawn.clone());
@@ -726,7 +713,7 @@ public class GameManager {
             return;
         }
         player.setGameMode(GameMode.SPECTATOR);
-        restorePlayerVitals(player);
+        playerSupport.restoreVitals(player);
     }
 
     private void forceRespawn(Player player, Runnable afterRespawn) {
@@ -917,8 +904,8 @@ public class GameManager {
         }
 
         participant.teleport(target.clone());
-        participant.setGameMode(GameMode.ADVENTURE);
-        restorePlayerVitals(participant);
+    participant.setGameMode(GameMode.ADVENTURE);
+    playerSupport.restoreVitals(participant);
         participant.sendTitle(ChatColor.GOLD + "Preparing...", "", 10, 40, 10);
         return true;
     }
@@ -1236,7 +1223,7 @@ public class GameManager {
             runnerIds.add(player.getUniqueId());
         }
         activeArena.setRunners(runnerIds);
-        removeExitTokens(current);
+    playerSupport.removeExitTokens(current);
     announceBeast(current, beast);
     scheduleTeleportCountdownStart(key, activeArena, arena, beast);
     }
@@ -1416,18 +1403,10 @@ public class GameManager {
             PotionEffect speed = new PotionEffect(PotionEffectType.SPEED, LONG_EFFECT_DURATION_TICKS, Math.max(speedLevel - 1, 0), false, false, true);
             beast.addPotionEffect(speed);
         }
-        applyFireResistance(beast);
+    playerSupport.applyFireResistance(beast);
         if (activeArena != null) {
             activeArena.setBeastId(beast.getUniqueId());
         }
-    }
-
-    private void applyFireResistance(Player player) {
-        if (player == null || !player.isOnline()) {
-            return;
-        }
-        PotionEffect fireResistance = new PotionEffect(PotionEffectType.FIRE_RESISTANCE, LONG_EFFECT_DURATION_TICKS, 0, false, false, true);
-        player.addPotionEffect(fireResistance);
     }
 
     private void openRunnerGate(ActiveArena activeArena, ArenaDefinition arena) {
@@ -1706,60 +1685,26 @@ public class GameManager {
         Location runnerLocation = arena.getRunnerSpawn().clone();
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (beast != null && beast.isOnline()) {
-                clearPreferenceSelectors(beast);
+                playerSupport.clearPreferenceSelectors(beast);
                 beast.teleport(beastLocation);
                 beast.setGameMode(GameMode.ADVENTURE);
-                restorePlayerVitals(beast);
+                playerSupport.restoreVitals(beast);
             }
             for (Player runner : players) {
                 if (beast != null && runner.equals(beast)) {
                     continue;
                 }
                 if (runner.isOnline()) {
-                    clearPreferenceSelectors(runner);
+                    playerSupport.clearPreferenceSelectors(runner);
                     runner.teleport(runnerLocation);
                     runner.setGameMode(GameMode.ADVENTURE);
-                    restorePlayerVitals(runner);
+                    playerSupport.restoreVitals(runner);
                 }
             }
-            equipBeast(beast);
-        });
-    }
-
-    private void equipBeast(Player beast) {
-        if (beast == null || !beast.isOnline()) {
-            return;
-        }
-
-        PlayerInventory inventory = beast.getInventory();
-        inventory.clear();
-
-        ItemStack sword = new ItemStack(Material.NETHERITE_SWORD);
-        inventory.setItem(0, sword);
-        beast.getInventory().setHeldItemSlot(0);
-
-        ItemStack potion = createHealingPotion();
-        inventory.setItem(1, potion.clone());
-        inventory.setItem(2, potion.clone());
-        inventory.setItem(3, potion.clone());
-
-        inventory.setHelmet(new ItemStack(Material.DIAMOND_HELMET));
-        inventory.setChestplate(new ItemStack(Material.DIAMOND_CHESTPLATE));
-        inventory.setLeggings(new ItemStack(Material.DIAMOND_LEGGINGS));
-
-        ItemStack boots = new ItemStack(Material.DIAMOND_BOOTS);
-        var bootsMeta = boots.getItemMeta();
-        if (bootsMeta != null) {
-            Enchantment featherFalling = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("feather_falling"));
-            if (featherFalling != null) {
-                bootsMeta.addEnchant(featherFalling, 4, true);
+            if (playerSupport.applyBeastLoadout(beast)) {
+                send(beast, ChatColor.DARK_RED + "" + ChatColor.BOLD + "You gear up in unbreakable armor.");
             }
-            bootsMeta.setUnbreakable(true);
-            boots.setItemMeta(bootsMeta);
-        }
-        inventory.setBoots(boots);
-
-        send(beast, ChatColor.DARK_RED + "" + ChatColor.BOLD + "You gear up in unbreakable armor.");
+        });
     }
 
     private ItemStack createExitToken() {
@@ -1776,169 +1721,28 @@ public class GameManager {
         return stack;
     }
 
-    private void giveExitToken(Player player) {
-        if (player == null || !player.isOnline()) {
-            return;
-        }
-        PlayerInventory inventory = player.getInventory();
-        ItemStack current = inventory.getItem(EXIT_TOKEN_SLOT);
-        if (isExitToken(current)) {
-            return;
-        }
-        ItemStack token = exitTokenTemplate.clone();
-        inventory.setItem(EXIT_TOKEN_SLOT, token);
-    }
-
     private void removeExitToken(Player player) {
-        if (player == null) {
-            return;
-        }
-        PlayerInventory inventory = player.getInventory();
-        for (int slot = 0; slot < inventory.getSize(); slot++) {
-            ItemStack item = inventory.getItem(slot);
-            if (isExitToken(item)) {
-                inventory.clear(slot);
-            }
-        }
+        playerSupport.removeExitToken(player);
     }
 
-    private void removeExitTokens(Collection<Player> players) {
-        if (players == null) {
-            return;
-        }
-        for (Player player : players) {
-            removeExitToken(player);
-            clearPreferenceSelectors(player);
-        }
+    private void giveExitToken(Player player) {
+        playerSupport.giveExitToken(player);
     }
 
     public boolean isExitToken(ItemStack stack) {
-        if (stack == null || stack.getType() != Material.NETHER_STAR) {
-            return false;
-        }
-        var meta = stack.getItemMeta();
-        if (meta == null) {
-            return false;
-        }
-        return meta.getPersistentDataContainer().has(exitTokenKey, PersistentDataType.BYTE);
-    }
-
-    private void givePreferenceSelectors(Player player, RolePreference selected) {
-        if (player == null || !player.isOnline()) {
-            return;
-        }
-        PlayerInventory inventory = player.getInventory();
-        if (!canChoosePreference(player)) {
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                if (clearPreferenceSelectors(inventory)) {
-                    player.updateInventory();
-                }
-            });
-            return;
-        }
-
-        RolePreference applied = selected != null ? selected : RolePreference.ANY;
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            clearPreferenceSelectors(inventory);
-            inventory.setItem(PREFERENCE_BEAST_SLOT, createPreferenceSelector(RolePreference.BEAST, applied));
-            inventory.setItem(PREFERENCE_RUNNER_SLOT, createPreferenceSelector(RolePreference.RUNNER, applied));
-            player.updateInventory();
-        });
-    }
-
-    private ItemStack createPreferenceSelector(RolePreference type, RolePreference selected) {
-        Material material = type == RolePreference.BEAST ? Material.RED_WOOL : Material.GREEN_WOOL;
-        ItemStack item = new ItemStack(material, 1);
-        ItemMeta meta = item.getItemMeta();
-        if (meta == null) {
-            return item;
-        }
-
-        boolean chosen = selected == type;
-        String title = (type == RolePreference.BEAST ? ChatColor.DARK_RED : ChatColor.GREEN)
-                + "" + ChatColor.BOLD + (type == RolePreference.BEAST ? "Beast" : "Runner") + " Preference";
-
-        List<String> lore = new ArrayList<>();
-        if (chosen) {
-            lore.add(ChatColor.GOLD + "Selected");
-            lore.add(ChatColor.GRAY + "Right-click again to clear.");
-            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
-        } else {
-            lore.add(ChatColor.GRAY + "Right-click to favor this role.");
-            lore.add(ChatColor.DARK_GRAY + "Right-click again to reset.");
-        }
-
-        meta.setDisplayName(title);
-        meta.setLore(lore);
-        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_UNBREAKABLE);
-        meta.getPersistentDataContainer().set(preferenceKey, PersistentDataType.STRING, type.name());
-        item.setItemMeta(meta);
-        return item;
-    }
-
-    private void clearPreferenceSelectors(Player player) {
-        if (player == null) {
-            return;
-        }
-        boolean changed = clearPreferenceSelectors(player.getInventory());
-        if (changed) {
-            player.updateInventory();
-        }
-    }
-
-    private boolean clearPreferenceSelectors(PlayerInventory inventory) {
-        if (inventory == null) {
-            return false;
-        }
-        boolean changed = false;
-        List<Integer> slotsToClear = new ArrayList<>();
-        for (int slot = 0; slot < inventory.getSize(); slot++) {
-            ItemStack item = inventory.getItem(slot);
-            if (isPreferenceSelector(item)) {
-                slotsToClear.add(slot);
-            }
-        }
-        for (int slot : slotsToClear) {
-            inventory.clear(slot);
-            changed = true;
-        }
-        return changed;
-    }
-
-    private RolePreference readPreferenceType(ItemStack stack) {
-        if (stack == null || stack.getType().isAir()) {
-            return null;
-        }
-        ItemMeta meta = stack.getItemMeta();
-        if (meta == null) {
-            return null;
-        }
-        var container = meta.getPersistentDataContainer();
-        if (!container.has(preferenceKey, PersistentDataType.STRING)) {
-            return null;
-        }
-        String stored = container.get(preferenceKey, PersistentDataType.STRING);
-        if (stored == null) {
-            return null;
-        }
-        try {
-            return RolePreference.valueOf(stored);
-        } catch (IllegalArgumentException ex) {
-            return null;
-        }
+        return playerSupport.isExitToken(stack);
     }
 
     public boolean isPreferenceSelector(ItemStack stack) {
-        RolePreference type = readPreferenceType(stack);
-        return type == RolePreference.BEAST || type == RolePreference.RUNNER;
+        return playerSupport.isPreferenceSelector(stack);
     }
 
     public boolean isManagedItem(ItemStack stack) {
-        return isExitToken(stack) || isPreferenceSelector(stack);
+        return playerSupport.isExitToken(stack) || playerSupport.isPreferenceSelector(stack);
     }
 
     public void handlePreferenceItemUse(Player player, ItemStack stack) {
-        RolePreference desired = readPreferenceType(stack);
+    RolePreference desired = playerSupport.readPreferenceType(stack);
         if (player == null || desired == null) {
             return;
         }
@@ -1969,105 +1773,7 @@ public class GameManager {
         }
 
         activeArena.setPreference(player.getUniqueId(), next);
-        givePreferenceSelectors(player, next);
-    }
-
-    private ItemStack createHealingPotion() {
-        ItemStack potion = new ItemStack(Material.SPLASH_POTION);
-        PotionMeta meta = (PotionMeta) potion.getItemMeta();
-        if (meta != null) {
-            meta.setBasePotionType(PotionType.STRONG_HEALING);
-            meta.setDisplayName(ChatColor.LIGHT_PURPLE + "" + ChatColor.BOLD + "Burst Heal");
-            potion.setItemMeta(meta);
-        }
-        return potion;
-    }
-
-    private ItemStack createEnchantedBow(int powerLevel) {
-        ItemStack bow = new ItemStack(Material.BOW);
-        var bowMeta = bow.getItemMeta();
-        if (bowMeta != null) {
-            Enchantment infinity = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("infinity"));
-            Enchantment power = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("power"));
-            if (infinity != null) {
-                bowMeta.addEnchant(infinity, 1, true);
-            }
-            if (power != null) {
-                bowMeta.addEnchant(power, Math.max(1, powerLevel), true);
-            }
-            bow.setItemMeta(bowMeta);
-        }
-        return bow;
-    }
-
-    private void scheduleRunnerReward(Player runner) {
-        if (runner == null) {
-            return;
-        }
-
-        UUID runnerId = runner.getUniqueId();
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            Player online = Bukkit.getPlayer(runnerId);
-            if (online != null && online.isOnline()) {
-                grantRunnerReward(online);
-            }
-        }, 20L);
-    }
-
-    private void grantRunnerReward(Player runner) {
-        if (runner == null || !runner.isOnline()) {
-            return;
-        }
-
-        resetPlayerLoadout(runner);
-        restorePlayerVitals(runner);
-
-        PlayerInventory inventory = runner.getInventory();
-
-        ItemStack sword = new ItemStack(Material.NETHERITE_SWORD);
-        var swordMeta = sword.getItemMeta();
-        if (swordMeta != null) {
-            Enchantment sharpness = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("sharpness"));
-            if (sharpness != null) {
-                swordMeta.addEnchant(sharpness, 3, true);
-            }
-            sword.setItemMeta(swordMeta);
-        }
-        inventory.setItem(0, sword);
-        runner.getInventory().setHeldItemSlot(0);
-
-    ItemStack bow = createEnchantedBow(1);
-    inventory.setItem(1, bow);
-
-        ItemStack potion = createHealingPotion();
-        for (int slot = 2; slot <= 6; slot++) {
-            inventory.setItem(slot, potion.clone());
-        }
-
-        ItemStack arrow = new ItemStack(Material.ARROW, 1);
-        inventory.setItem(17, arrow);
-
-        inventory.setHelmet(new ItemStack(Material.NETHERITE_HELMET));
-        inventory.setChestplate(new ItemStack(Material.NETHERITE_CHESTPLATE));
-        inventory.setLeggings(new ItemStack(Material.NETHERITE_LEGGINGS));
-        ItemStack boots = new ItemStack(Material.NETHERITE_BOOTS);
-        var bootsMeta = boots.getItemMeta();
-        if (bootsMeta != null) {
-            Enchantment featherFalling = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("feather_falling"));
-            if (featherFalling != null) {
-                bootsMeta.addEnchant(featherFalling, 4, true);
-            }
-            bootsMeta.setUnbreakable(true);
-            boots.setItemMeta(bootsMeta);
-        }
-        inventory.setBoots(boots);
-
-        PotionEffect speedBoost = new PotionEffect(PotionEffectType.SPEED, Integer.MAX_VALUE, 1, false, false, true);
-    runner.removePotionEffect(PotionEffectType.SPEED);
-    runner.addPotionEffect(speedBoost);
-
-        send(runner, ChatColor.GOLD + "" + ChatColor.BOLD + "Victory spoils! "
-                + ChatColor.RESET + ChatColor.GOLD + "You bolted through the finish and are ready for the Beast.");
+    playerSupport.givePreferenceSelectors(player, next);
     }
 
     private void cleanupArena(String key, ActiveArena activeArena) {
@@ -2209,26 +1915,6 @@ public class GameManager {
         player.sendMessage(prefix + message);
     }
 
-    private void restorePlayerVitals(Player player) {
-        if (player == null) {
-            return;
-        }
-
-        var attribute = player.getAttribute(Attribute.GENERIC_MAX_HEALTH);
-        double maxHealth = attribute != null ? attribute.getValue() : player.getHealthScale();
-        if (Double.isNaN(maxHealth) || maxHealth <= 0) {
-            maxHealth = 20.0;
-        }
-
-        player.setHealth(Math.min(maxHealth, player.getHealth()));
-        player.setFoodLevel(20);
-        player.setSaturation(20.0f);
-        player.setExhaustion(0.0f);
-        if (player.getHealth() < maxHealth) {
-            player.setHealth(maxHealth);
-        }
-    }
-
     private boolean isSameBlock(Location first, Location second) {
         if (first == null || second == null) {
             return false;
@@ -2242,321 +1928,6 @@ public class GameManager {
         return first.getBlockX() == second.getBlockX()
                 && first.getBlockY() == second.getBlockY()
                 && first.getBlockZ() == second.getBlockZ();
-    }
-
-    public static final class ArenaStatus {
-        private final String arenaName;
-        private final boolean available;
-        private final boolean complete;
-        private final int playerCount;
-        private final int capacity;
-        private final boolean running;
-        private final boolean selecting;
-        private final boolean matchActive;
-
-        private ArenaStatus(String arenaName, boolean available, boolean complete, int playerCount, int capacity,
-                             boolean running, boolean selecting, boolean matchActive) {
-            this.arenaName = arenaName;
-            this.available = available;
-            this.complete = complete;
-            this.playerCount = playerCount;
-            this.capacity = capacity;
-            this.running = running;
-            this.selecting = selecting;
-            this.matchActive = matchActive;
-        }
-
-        private static ArenaStatus unavailable(String arenaName) {
-            return new ArenaStatus(arenaName, false, false, 0, -1, false, false, false);
-        }
-
-        public String getArenaName() {
-            return arenaName;
-        }
-
-        public boolean isAvailable() {
-            return available;
-        }
-
-        public boolean isComplete() {
-            return complete;
-        }
-
-        public int getPlayerCount() {
-            return playerCount;
-        }
-
-        public int getCapacity() {
-            return capacity;
-        }
-
-        public boolean hasCapacityLimit() {
-            return capacity >= 0;
-        }
-
-        public boolean isRunning() {
-            return running;
-        }
-
-        public boolean isSelecting() {
-            return selecting;
-        }
-
-        public boolean isMatchActive() {
-            return matchActive;
-        }
-
-        public boolean isBusy() {
-            return running || selecting || matchActive;
-        }
-    }
-
-    private static class ActiveArena {
-        private final ArenaDefinition arena;
-        private final Set<UUID> players = new LinkedHashSet<>();
-        private final Set<UUID> runners = new HashSet<>();
-        private final Set<BukkitTask> trackedTasks = new HashSet<>();
-        private final Set<UUID> spectatingRunners = new HashSet<>();
-        private final Map<UUID, RolePreference> preferences = new ConcurrentHashMap<>();
-        private List<BlockState> runnerWallSnapshot;
-        private List<BlockState> beastWallSnapshot;
-        private boolean running;
-        private boolean runnerWallOpened;
-        private boolean beastWallOpened;
-        private boolean selecting;
-        private boolean matchActive;
-        private boolean finalPhase;
-    private boolean rewardSuppressed;
-    private long invulnerabilityUntilMillis;
-        private UUID beastId;
-
-        private ActiveArena(ArenaDefinition arena) {
-            this.arena = arena;
-        }
-
-        private ArenaDefinition getArena() {
-            return arena;
-        }
-
-        private boolean addPlayer(Player player) {
-            return players.add(player.getUniqueId());
-        }
-
-        private boolean contains(UUID uuid) {
-            return players.contains(uuid);
-        }
-
-        private Set<UUID> getPlayerIds() {
-            return players;
-        }
-
-        private void clearPlayers() {
-            players.clear();
-            preferences.clear();
-            clearMatchState();
-        }
-
-        private void registerTask(BukkitTask task) {
-            if (task != null) {
-                trackedTasks.add(task);
-            }
-        }
-
-        private void unregisterTask(BukkitTask task) {
-            if (task != null) {
-                trackedTasks.remove(task);
-            }
-        }
-
-        private void cancelTasks() {
-            for (BukkitTask task : new HashSet<>(trackedTasks)) {
-                task.cancel();
-            }
-            trackedTasks.clear();
-        }
-
-        private boolean isRunning() {
-            return running;
-        }
-
-        private void setRunning(boolean running) {
-            this.running = running;
-        }
-
-        private boolean isSelecting() {
-            return selecting;
-        }
-
-        private void setSelecting(boolean selecting) {
-            this.selecting = selecting;
-        }
-
-        private boolean isMatchActive() {
-            return matchActive;
-        }
-
-        private void setMatchActive(boolean matchActive) {
-            this.matchActive = matchActive;
-        }
-
-        private boolean isFinalPhase() {
-            return finalPhase;
-        }
-
-        private void setFinalPhase(boolean finalPhase) {
-            this.finalPhase = finalPhase;
-        }
-
-        private boolean isRewardSuppressed() {
-            return rewardSuppressed;
-        }
-
-        private void setRewardSuppressed(boolean rewardSuppressed) {
-            this.rewardSuppressed = rewardSuppressed;
-        }
-
-        private void enableDamageProtection() {
-            invulnerabilityUntilMillis = Long.MAX_VALUE;
-        }
-
-        private void releaseDamageProtectionAfter(long delayMillis) {
-            invulnerabilityUntilMillis = System.currentTimeMillis() + Math.max(delayMillis, 0L);
-        }
-
-        private void clearDamageProtection() {
-            invulnerabilityUntilMillis = 0L;
-        }
-
-        private boolean isDamageProtectionActive() {
-            if (invulnerabilityUntilMillis == 0L) {
-                return false;
-            }
-            if (invulnerabilityUntilMillis == Long.MAX_VALUE) {
-                return true;
-            }
-            if (System.currentTimeMillis() <= invulnerabilityUntilMillis) {
-                return true;
-            }
-            invulnerabilityUntilMillis = 0L;
-            return false;
-        }
-
-        private UUID getBeastId() {
-            return beastId;
-        }
-
-        private void setBeastId(UUID beastId) {
-            this.beastId = beastId;
-        }
-
-        private void setRunners(Collection<UUID> runnerIds) {
-            runners.clear();
-            if (runnerIds != null) {
-                runners.addAll(runnerIds);
-            }
-        }
-
-        private boolean isRunner(UUID uuid) {
-            return runners.contains(uuid);
-        }
-
-        private boolean removeRunner(UUID uuid) {
-            return runners.remove(uuid);
-        }
-
-        private boolean hasRunners() {
-            return !runners.isEmpty();
-        }
-
-        private int getRunnerCount() {
-            return runners.size();
-        }
-
-        private boolean removePlayer(UUID uuid) {
-            boolean removed = players.remove(uuid);
-            preferences.remove(uuid);
-            runners.remove(uuid);
-            if (beastId != null && beastId.equals(uuid)) {
-                beastId = null;
-            }
-            spectatingRunners.remove(uuid);
-            return removed;
-        }
-
-        private void addSpectatingRunner(UUID uuid) {
-            if (uuid != null) {
-                spectatingRunners.add(uuid);
-            }
-        }
-
-        private void removeSpectatingRunner(UUID uuid) {
-            if (uuid != null) {
-                spectatingRunners.remove(uuid);
-            }
-        }
-
-        private boolean isSpectatingRunner(UUID uuid) {
-            return uuid != null && spectatingRunners.contains(uuid);
-        }
-
-        private boolean isRunnerWallOpened() {
-            return runnerWallOpened;
-        }
-
-        private void setRunnerWallOpened(boolean runnerWallOpened) {
-            this.runnerWallOpened = runnerWallOpened;
-        }
-
-        private boolean isBeastWallOpened() {
-            return beastWallOpened;
-        }
-
-        private void setBeastWallOpened(boolean beastWallOpened) {
-            this.beastWallOpened = beastWallOpened;
-        }
-
-        private void setPreference(UUID uuid, RolePreference preference) {
-            if (preference == null || preference == RolePreference.ANY) {
-                preferences.remove(uuid);
-            } else {
-                preferences.put(uuid, preference);
-            }
-        }
-
-        private RolePreference getPreference(UUID uuid) {
-            return preferences.getOrDefault(uuid, RolePreference.ANY);
-        }
-
-        private void removePreference(UUID uuid) {
-            preferences.remove(uuid);
-        }
-
-        private void clearMatchState() {
-            selecting = false;
-            matchActive = false;
-            finalPhase = false;
-            rewardSuppressed = false;
-            clearDamageProtection();
-            beastId = null;
-            runners.clear();
-            spectatingRunners.clear();
-        }
-
-        private List<BlockState> getRunnerWallSnapshot() {
-            return runnerWallSnapshot;
-        }
-
-        private void setRunnerWallSnapshot(List<BlockState> runnerWallSnapshot) {
-            this.runnerWallSnapshot = runnerWallSnapshot;
-        }
-
-        private List<BlockState> getBeastWallSnapshot() {
-            return beastWallSnapshot;
-        }
-
-        private void setBeastWallSnapshot(List<BlockState> beastWallSnapshot) {
-            this.beastWallSnapshot = beastWallSnapshot;
-        }
     }
 
     private enum PlayerTier {

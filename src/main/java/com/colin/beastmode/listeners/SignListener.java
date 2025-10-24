@@ -1,5 +1,6 @@
 package com.colin.beastmode.listeners;
 
+import com.colin.beastmode.game.ArenaStatus;
 import com.colin.beastmode.game.GameManager;
 import com.colin.beastmode.model.ArenaDefinition;
 import com.colin.beastmode.storage.ArenaStorage;
@@ -70,7 +71,7 @@ public class SignListener implements Listener {
             return;
         }
 
-        GameManager.ArenaStatus status = gameManager.getArenaStatus(arena.getName());
+    ArenaStatus status = gameManager.getArenaStatus(arena.getName());
         applyLines(event, status);
         registerSign(event.getBlock(), arena.getName());
         player.sendMessage(prefix + ChatColor.GREEN + "Join sign created for arena '" + arena.getName() + "'.");
@@ -121,7 +122,7 @@ public class SignListener implements Listener {
         updateSign(sign, arena.getName());
     }
 
-    private void applyLines(SignChangeEvent event, GameManager.ArenaStatus status) {
+    private void applyLines(SignChangeEvent event, ArenaStatus status) {
         if (!status.isAvailable()) {
             event.setLine(0, SIGN_KEY);
             event.setLine(1, ChatColor.RED + "Unknown");
@@ -136,7 +137,7 @@ public class SignListener implements Listener {
     }
 
     private void updateSign(Sign sign, String arenaName) {
-        GameManager.ArenaStatus status = gameManager.getArenaStatus(arenaName);
+    ArenaStatus status = gameManager.getArenaStatus(arenaName);
         if (!status.isAvailable()) {
             applyMissing(sign.getSide(Side.FRONT));
             applyMissing(sign.getSide(Side.BACK));
@@ -147,7 +148,7 @@ public class SignListener implements Listener {
         sign.update();
     }
 
-    private void applyLines(SignSide side, GameManager.ArenaStatus status) {
+    private void applyLines(SignSide side, ArenaStatus status) {
         if (side == null) {
             return;
         }
@@ -161,7 +162,7 @@ public class SignListener implements Listener {
         side.setLine(3, formatStatusLine(status));
     }
 
-    private String formatPlayerLine(GameManager.ArenaStatus status) {
+    private String formatPlayerLine(ArenaStatus status) {
         int count = status.getPlayerCount();
         if (status.hasCapacityLimit()) {
             return ChatColor.YELLOW + "Players: " + count + "/" + status.getCapacity();
@@ -169,7 +170,7 @@ public class SignListener implements Listener {
         return ChatColor.YELLOW + "Players: " + count;
     }
 
-    private String formatStatusLine(GameManager.ArenaStatus status) {
+    private String formatStatusLine(ArenaStatus status) {
         if (!status.isAvailable()) {
             return ChatColor.RED + "Status: Offline";
         }
