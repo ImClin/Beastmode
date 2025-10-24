@@ -66,9 +66,23 @@ public class GameListener implements Listener {
     public void onPlayerInteract(PlayerInteractEvent event) {
         Player player = event.getPlayer();
         EquipmentSlot hand = event.getHand();
+        Action action = event.getAction();
 
         ItemStack main = player.getInventory().getItemInMainHand();
         ItemStack off = player.getInventory().getItemInOffHand();
+
+        if (action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK) {
+            if (hand == EquipmentSlot.HAND && gameManager.isPreferenceSelector(main)) {
+                event.setCancelled(true);
+                gameManager.handlePreferenceItemUse(player, main);
+                return;
+            }
+            if (hand == EquipmentSlot.OFF_HAND && gameManager.isPreferenceSelector(off)) {
+                event.setCancelled(true);
+                gameManager.handlePreferenceItemUse(player, off);
+                return;
+            }
+        }
 
         boolean usingExitToken = false;
         if (hand == EquipmentSlot.HAND) {
@@ -96,7 +110,6 @@ public class GameListener implements Listener {
             return;
         }
 
-        Action action = event.getAction();
         if (action != Action.RIGHT_CLICK_BLOCK && action != Action.LEFT_CLICK_BLOCK) {
             return;
         }
@@ -146,7 +159,7 @@ public class GameListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onPlayerDrop(PlayerDropItemEvent event) {
-        if (gameManager.isExitToken(event.getItemDrop().getItemStack())) {
+        if (gameManager.isManagedItem(event.getItemDrop().getItemStack())) {
             event.setCancelled(true);
         }
     }
@@ -156,7 +169,7 @@ public class GameListener implements Listener {
         if (!(event.getWhoClicked() instanceof Player)) {
             return;
         }
-        if (gameManager.isExitToken(event.getCurrentItem()) || gameManager.isExitToken(event.getCursor())) {
+        if (gameManager.isManagedItem(event.getCurrentItem()) || gameManager.isManagedItem(event.getCursor())) {
             event.setCancelled(true);
         }
     }
@@ -167,7 +180,7 @@ public class GameListener implements Listener {
             return;
         }
         for (ItemStack stack : event.getNewItems().values()) {
-            if (gameManager.isExitToken(stack)) {
+            if (gameManager.isManagedItem(stack)) {
                 event.setCancelled(true);
                 return;
             }

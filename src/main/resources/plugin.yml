@@ -12,3 +12,9 @@ permissions:
   beastmode.command:
     description: Allows access to Beastmode commands
     default: op
+  beastmode.preference.vip:
+    description: Allows choosing Beast/Runner preference with VIP weighting bonuses
+    default: false
+  beastmode.preference.njog:
+    description: Allows choosing Beast/Runner preference with NJOG weighting bonuses
+    default: false

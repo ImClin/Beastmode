@@ -225,6 +225,17 @@ public class SetupSessionManager {
                             + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
                     return true;
                 }
+                advanceStage(session, SetupStage.BEAST_SPEED_LEVEL);
+            }
+            case BEAST_SPEED_LEVEL -> {
+                session.setBeastSpeedLevel(value);
+                send(player, ChatColor.GREEN + "Beast speed level set to " + value + ".");
+                if (mode == SetupMode.EDIT_BEAST_SPEED) {
+                    arenaStorage.updateBeastSpeedLevel(session.getArenaName(), value);
+                    finishEdit(player, session, ChatColor.GREEN + "Beast speed updated for arena "
+                            + ChatColor.AQUA + session.getArenaName() + ChatColor.GREEN + ".");
+                    return true;
+                }
                 advanceStage(session, SetupStage.MIN_RUNNERS);
             }
             case MIN_RUNNERS -> {
@@ -427,6 +438,11 @@ public class SetupSessionManager {
                 ChatColor.YELLOW + "Type the new beast release delay in chat." + ChatColor.GRAY + " (or 'cancel')");
     }
 
+    public boolean beginBeastSpeedEdit(Player player, String arenaName) {
+        return beginNumericEdit(player, arenaName, SetupMode.EDIT_BEAST_SPEED, SetupStage.BEAST_SPEED_LEVEL,
+                ChatColor.YELLOW + "Type the new beast speed level in chat." + ChatColor.GRAY + " (or 'cancel')");
+    }
+
     public boolean beginMinRunnerEdit(Player player, String arenaName) {
         return beginNumericEdit(player, arenaName, SetupMode.EDIT_MIN_RUNNERS, SetupStage.MIN_RUNNERS,
                 ChatColor.YELLOW + "Type the new minimum number of runners (at least 1)." + ChatColor.GRAY + " (or 'cancel')");
@@ -480,11 +496,14 @@ public class SetupSessionManager {
         } else if (stage == SetupStage.MAX_RUNNERS) {
             session.setMinRunners(arena.getMinRunners());
             session.setMaxRunners(arena.getMaxRunners());
+        } else if (stage == SetupStage.BEAST_SPEED_LEVEL) {
+            session.setBeastSpeedLevel(arena.getBeastSpeedLevel());
         }
         sessions.put(player.getUniqueId(), session);
         int currentValue = switch (stage) {
             case RUNNER_WALL_DELAY -> arena.getRunnerWallDelaySeconds();
             case BEAST_RELEASE_DELAY -> arena.getBeastReleaseDelaySeconds();
+            case BEAST_SPEED_LEVEL -> arena.getBeastSpeedLevel();
             case MIN_RUNNERS -> arena.getMinRunners();
             case MAX_RUNNERS -> arena.getMaxRunners();
             default -> -1;

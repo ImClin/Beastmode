@@ -34,6 +34,13 @@ Beastmode is a Spigot/Paper mini-game plugin focused on a hunter-versus-runner e
 - `/beastmode setwaiting` — define the waiting room spawn during setup.
 - `/beastmode cancel` — exit the current setup session.
 
+## Permissions
+- `beastmode.command` — grants access to all Beastmode commands (default: op).
+- `beastmode.preference.vip` — allows players to pick Beast/Runner preference with a 40% Beast weight bonus (and 40% reduction if they opt for Runner).
+- `beastmode.preference.njog` — allows preference selection with a 60% Beast weight bonus (and 60% reduction if they opt for Runner).
+
+Players granted a preference permission receive red (Beast) and green (Runner) wool in their first two hotbar slots when queued; right-click to toggle a preference and right-click again to clear it.
+
 ## Development Notes
 - `src/main/java` contains all plugin source code; `src/main/resources` holds configuration defaults.
 - Use `gradlew.bat runServer` to start a local Paper server (configured for 1.21) for testing.

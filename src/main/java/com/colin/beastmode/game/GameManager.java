@@ -23,6 +23,7 @@ import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.PotionMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
@@ -33,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -40,8 +42,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 public class GameManager {
 
@@ -51,12 +55,18 @@ public class GameManager {
     private final Set<UUID> pendingSpawnTeleports = ConcurrentHashMap.newKeySet();
     private final String prefix;
     private final NamespacedKey exitTokenKey;
+    private final NamespacedKey preferenceKey;
     private final ItemStack exitTokenTemplate;
+    private final List<Consumer<String>> statusListeners = new CopyOnWriteArrayList<>();
     private static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     private static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
+    private static final String PERM_PREFERENCE_VIP = "beastmode.preference.vip";
+    private static final String PERM_PREFERENCE_NJOG = "beastmode.preference.njog";
     private static final String DEFAULT_BEAST_NAME = "The Beast";
     private static final int EXIT_TOKEN_SLOT = 8;
+    private static final int PREFERENCE_BEAST_SLOT = 0;
+    private static final int PREFERENCE_RUNNER_SLOT = 1;
     private static final int LONG_EFFECT_DURATION_TICKS = 20 * 600;
 
     public enum RolePreference {
@@ -70,7 +80,40 @@ public class GameManager {
         this.arenaStorage = arenaStorage;
         this.prefix = plugin.getConfig().getString("messages.prefix", "[Beastmode] ");
         this.exitTokenKey = new NamespacedKey(plugin, "exit_token");
+        this.preferenceKey = new NamespacedKey(plugin, "preference_selector");
         this.exitTokenTemplate = createExitToken();
+    }
+
+    public void registerStatusListener(Consumer<String> listener) {
+        if (listener != null) {
+            statusListeners.add(listener);
+        }
+    }
+
+    public void unregisterStatusListener(Consumer<String> listener) {
+        if (listener != null) {
+            statusListeners.remove(listener);
+        }
+    }
+
+    private void notifyStatusListeners(String arenaName) {
+        if (arenaName == null) {
+            return;
+        }
+        String trimmed = arenaName.trim();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+        for (Consumer<String> listener : statusListeners) {
+            listener.accept(trimmed);
+        }
+    }
+
+    private void notifyArenaStatus(ActiveArena activeArena) {
+        if (activeArena == null || activeArena.getArena() == null) {
+            return;
+        }
+        notifyStatusListeners(activeArena.getArena().getName());
     }
 
     public void joinArena(Player player, String arenaName) {
@@ -104,6 +147,10 @@ public class GameManager {
         }
 
         String key = arena.getName().toLowerCase(Locale.ENGLISH);
+        if (preference != null && preference != RolePreference.ANY && !canChoosePreference(player)) {
+            preference = RolePreference.ANY;
+        }
+
         ActiveArena activeArena = activeArenas.computeIfAbsent(key, k -> new ActiveArena(arena));
         if (activeArena.isMatchActive()) {
             send(player, ChatColor.RED + "That arena is already in a hunt. Try again in a moment.");
@@ -130,12 +177,21 @@ public class GameManager {
             } else {
                 send(player, ChatColor.YELLOW + "You are already in the queue for this arena.");
             }
+            if (canChoosePreference(player)) {
+                givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
+            } else {
+                clearPreferenceSelectors(player);
+            }
+            notifyArenaStatus(activeArena);
             return;
         }
 
         resetPlayerLoadout(player);
         if (!activeArena.isMatchActive()) {
             giveExitToken(player);
+        }
+        if (canChoosePreference(player)) {
+            givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
         }
 
         send(player, ChatColor.GREEN + "Joined arena " + ChatColor.AQUA + arena.getName() + ChatColor.GREEN + ".");
@@ -150,9 +206,11 @@ public class GameManager {
                 send(player, ChatColor.YELLOW + "You slipped in before the gates drop. Hold tight!");
             }
             maybeStartCountdown(key, activeArena);
+            notifyArenaStatus(activeArena);
             return;
         }
         startMatch(key, activeArena);
+        notifyArenaStatus(activeArena);
     }
 
     private void resetPlayerLoadout(Player player) {
@@ -260,7 +318,12 @@ public class GameManager {
         }
 
         if (finisher != null) {
+            if (!activeArena.isRunner(finisher.getUniqueId())) {
+                return;
+            }
+
             if (activeArena.isFinalPhase()) {
+                rewardAdditionalFinisher(activeArena, finisher);
                 return;
             }
 
@@ -270,7 +333,6 @@ public class GameManager {
             String title = ChatColor.GOLD + "" + ChatColor.BOLD + "Parkour Complete!";
             String subtitle = ChatColor.AQUA + finisherName + ChatColor.YELLOW + " finished the parkour and is ready to slay the Beast!";
 
-            List<UUID> toRemove = new ArrayList<>();
             for (Player participant : participants) {
                 boolean isFinisher = participant.getUniqueId().equals(finisher.getUniqueId());
                 boolean isBeast = beastId != null && beastId.equals(participant.getUniqueId());
@@ -292,23 +354,15 @@ public class GameManager {
                     continue;
                 }
 
-                send(participant, ChatColor.YELLOW + "You have been removed from the arena while "
-                        + ChatColor.AQUA + finisherName + ChatColor.YELLOW + " prepares to fight the Beast.");
-        participant.removePotionEffect(PotionEffectType.SPEED);
-        participant.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
-                resetPlayerLoadout(participant);
-                sendPlayerToSpawn(activeArena, participant);
-                toRemove.add(participant.getUniqueId());
-            }
-
-            for (UUID uuid : toRemove) {
-                activeArena.removePlayer(uuid);
+                send(participant, ChatColor.YELLOW + "Keep moving! "
+                        + ChatColor.AQUA + finisherName + ChatColor.YELLOW + " found the armory and is gearing up.");
             }
             return;
         }
 
         boolean finalPhase = activeArena.isFinalPhase();
         activeArena.setMatchActive(false);
+    notifyArenaStatus(activeArena);
 
         String title = ChatColor.GREEN + "" + ChatColor.BOLD + "Runner Victory!";
         String subtitle = finalPhase
@@ -333,8 +387,48 @@ public class GameManager {
         cleanupArena(key, activeArena);
     }
 
+    private void rewardAdditionalFinisher(ActiveArena activeArena, Player finisher) {
+        if (activeArena == null || finisher == null || !finisher.isOnline()) {
+            return;
+        }
+
+        List<Player> participants = collectParticipants(activeArena);
+        if (participants.isEmpty()) {
+            return;
+        }
+
+        UUID beastId = activeArena.getBeastId();
+        String finisherName = finisher.getName();
+        String title = ChatColor.GOLD + "" + ChatColor.BOLD + "Parkour Complete!";
+        String subtitle = ChatColor.AQUA + finisherName + ChatColor.YELLOW + " stocked up for the fight!";
+
+        for (Player participant : participants) {
+            boolean isFinisher = participant.getUniqueId().equals(finisher.getUniqueId());
+            boolean isBeast = beastId != null && beastId.equals(participant.getUniqueId());
+
+            if (isFinisher) {
+                participant.sendTitle(title, subtitle, 10, 60, 10);
+                participant.playSound(participant.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+                send(participant, ChatColor.GOLD + "" + ChatColor.BOLD + "Locked and loaded! "
+                        + ChatColor.RESET + ChatColor.GOLD + "Help slay the Beast.");
+                applyFireResistance(participant);
+                scheduleRunnerReward(participant);
+                continue;
+            }
+
+            if (isBeast) {
+                send(participant, ChatColor.DARK_RED + "" + ChatColor.BOLD + finisherName
+                        + ChatColor.RED + " armed up as well. Keep the pressure on!");
+                continue;
+            }
+
+            send(participant, ChatColor.YELLOW + finisherName + " has stocked the armory. Reinforcements are coming!");
+        }
+    }
+
     private void completeBeastVictory(String key, ActiveArena activeArena, Player beast) {
         activeArena.setMatchActive(false);
+        notifyArenaStatus(activeArena);
         List<Player> participants = collectParticipants(activeArena);
         if (beast != null && beast.isOnline() && !participants.contains(beast)) {
             participants.add(beast);
@@ -396,6 +490,9 @@ public class GameManager {
         UUID beastId = activeArena.getBeastId();
         if (beastId != null && beastId.equals(uuid)) {
             resetPlayerLoadout(player);
+            if (!activeArena.isFinalPhase()) {
+                activeArena.setRewardSuppressed(true);
+            }
             completeRunnerVictory(key, activeArena, null);
         }
     }
@@ -423,6 +520,7 @@ public class GameManager {
     activeArena.removePlayer(uuid);
     pendingSpawnTeleports.add(uuid);
     removeExitToken(player);
+    notifyArenaStatus(activeArena);
 
         if (!activeArena.isMatchActive()) {
             List<Player> remaining = collectParticipants(activeArena);
@@ -433,6 +531,7 @@ public class GameManager {
             int missing = getMissingParticipantsCount(remaining.size(), activeArena.getArena());
             if (missing > 0 && activeArena.isSelecting()) {
                 activeArena.setSelecting(false);
+                notifyArenaStatus(activeArena);
                 notifyWaitingForPlayers(activeArena, remaining);
             }
             return;
@@ -485,6 +584,7 @@ public class GameManager {
         player.setGameMode(GameMode.ADVENTURE);
         activeArena.removePlayer(uuid);
     removeExitToken(player);
+    notifyArenaStatus(activeArena);
 
         if (!activeArena.isMatchActive()) {
             List<Player> remaining = collectParticipants(activeArena);
@@ -494,6 +594,7 @@ public class GameManager {
                 int missing = getMissingParticipantsCount(remaining.size(), activeArena.getArena());
                 if (missing > 0 && activeArena.isSelecting()) {
                     activeArena.setSelecting(false);
+                    notifyArenaStatus(activeArena);
                     notifyWaitingForPlayers(activeArena, remaining);
                 }
             }
@@ -713,6 +814,10 @@ public class GameManager {
         return uuid != null && findArenaByPlayer(uuid) != null;
     }
 
+    public boolean canChoosePreference(Player player) {
+        return determineTier(player) != PlayerTier.NORMAL;
+    }
+
     public ArenaStatus getArenaStatus(String arenaName) {
         if (arenaName == null || arenaName.trim().isEmpty()) {
             return ArenaStatus.unavailable("");
@@ -743,8 +848,8 @@ public class GameManager {
             capacity = -1;
         }
 
-        return new ArenaStatus(arena.getName(), arena.isComplete(), playerCount, capacity,
-                running, selecting, matchActive);
+    return new ArenaStatus(arena.getName(), true, arena.isComplete(), playerCount, capacity,
+        running, selecting, matchActive);
     }
 
     private void startMatch(String key, ActiveArena activeArena) {
@@ -761,6 +866,7 @@ public class GameManager {
         activeArena.setRunning(true);
         activeArena.clearMatchState();
         activeArena.enableDamageProtection();
+        notifyArenaStatus(activeArena);
         if (activeArena.isRunnerWallOpened() || activeArena.isBeastWallOpened()) {
             resetArenaState(activeArena);
         }
@@ -828,6 +934,7 @@ public class GameManager {
         int required = getRequiredParticipants(arena);
         if (participants.size() < required) {
             activeArena.setSelecting(false);
+            notifyArenaStatus(activeArena);
             notifyWaitingForPlayers(activeArena, participants);
             return;
         }
@@ -837,6 +944,7 @@ public class GameManager {
         }
 
         activeArena.setSelecting(true);
+        notifyArenaStatus(activeArena);
         SelectionCountdown countdown = new SelectionCountdown(key, activeArena, 10, 5);
         countdown.start();
     }
@@ -904,6 +1012,7 @@ public class GameManager {
             if (current.size() < getRequiredParticipants(activeArena.getArena())) {
                 cancel();
                 activeArena.setSelecting(false);
+                notifyArenaStatus(activeArena);
                 notifyWaitingForPlayers(activeArena, current);
                 return;
             }
@@ -964,6 +1073,7 @@ public class GameManager {
             if (current.size() < getRequiredParticipants(activeArena.getArena())) {
                 cancel();
                 activeArena.setSelecting(false);
+                notifyArenaStatus(activeArena);
                 notifyWaitingForPlayers(activeArena, current);
                 return;
             }
@@ -1044,6 +1154,7 @@ public class GameManager {
             handle = runTaskTimer(plugin, 0L, 20L);
             activeArena.setMatchActive(true);
             activeArena.registerTask(handle);
+            notifyArenaStatus(activeArena);
         }
 
         @Override
@@ -1115,6 +1226,7 @@ public class GameManager {
 
         Player beast = resolveBeast(activeArena, current, selectedBeast);
         activeArena.setSelecting(false);
+    notifyArenaStatus(activeArena);
         activeArena.setBeastId(beast != null ? beast.getUniqueId() : null);
         Set<UUID> runnerIds = new HashSet<>();
         for (Player player : current) {
@@ -1154,31 +1266,46 @@ public class GameManager {
             }
         }
 
-        List<Player> preferredBeasts = new ArrayList<>();
+        Map<Player, Double> weights = new LinkedHashMap<>();
+        double total = 0.0;
+
         for (Player player : players) {
-            if (activeArena.getPreference(player.getUniqueId()) == RolePreference.BEAST) {
-                preferredBeasts.add(player);
+            RolePreference pref = activeArena.getPreference(player.getUniqueId());
+            double weight = calculateBeastWeight(player, pref);
+            if (weight <= 0.0d) {
+                continue;
+            }
+            weights.put(player, weight);
+            total += weight;
+        }
+
+        if (total <= 0.0d) {
+            for (Player player : players) {
+                double weight = fallbackBeastWeight(player);
+                if (weight <= 0.0d) {
+                    continue;
+                }
+                weights.put(player, weight);
+                total += weight;
             }
         }
-        if (!preferredBeasts.isEmpty()) {
-            return preferredBeasts.get(ThreadLocalRandom.current().nextInt(preferredBeasts.size()));
+
+        if (total <= 0.0d) {
+            if (players.size() == 1) {
+                return null; // practice run
+            }
+            return players.get(ThreadLocalRandom.current().nextInt(players.size()));
         }
 
-        List<Player> eligible = new ArrayList<>();
-        for (Player player : players) {
-            if (activeArena.getPreference(player.getUniqueId()) != RolePreference.RUNNER) {
-                eligible.add(player);
+        double pick = ThreadLocalRandom.current().nextDouble(total);
+        for (Map.Entry<Player, Double> entry : weights.entrySet()) {
+            pick -= entry.getValue();
+            if (pick <= 0.0d) {
+                return entry.getKey();
             }
         }
-        if (!eligible.isEmpty()) {
-            return eligible.get(ThreadLocalRandom.current().nextInt(eligible.size()));
-        }
 
-        if (players.size() == 1) {
-            return null; // practice run
-        }
-
-        return players.get(ThreadLocalRandom.current().nextInt(players.size()));
+        return weights.keySet().stream().reduce((first, second) -> second).orElseGet(() -> players.get(0));
     }
 
     private void announceBeast(List<Player> players, Player beast) {
@@ -1280,10 +1407,19 @@ public class GameManager {
         if (beast == null || !beast.isOnline()) {
             return;
         }
-        PotionEffect speed = new PotionEffect(PotionEffectType.SPEED, LONG_EFFECT_DURATION_TICKS, 0, false, false, true);
-        beast.addPotionEffect(speed);
+        int speedLevel = 1;
+        if (activeArena != null && activeArena.getArena() != null) {
+            speedLevel = Math.max(activeArena.getArena().getBeastSpeedLevel(), 0);
+        }
+        beast.removePotionEffect(PotionEffectType.SPEED);
+        if (speedLevel > 0) {
+            PotionEffect speed = new PotionEffect(PotionEffectType.SPEED, LONG_EFFECT_DURATION_TICKS, Math.max(speedLevel - 1, 0), false, false, true);
+            beast.addPotionEffect(speed);
+        }
         applyFireResistance(beast);
-        activeArena.setBeastId(beast.getUniqueId());
+        if (activeArena != null) {
+            activeArena.setBeastId(beast.getUniqueId());
+        }
     }
 
     private void applyFireResistance(Player player) {
@@ -1570,6 +1706,7 @@ public class GameManager {
         Location runnerLocation = arena.getRunnerSpawn().clone();
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (beast != null && beast.isOnline()) {
+                clearPreferenceSelectors(beast);
                 beast.teleport(beastLocation);
                 beast.setGameMode(GameMode.ADVENTURE);
                 restorePlayerVitals(beast);
@@ -1579,6 +1716,7 @@ public class GameManager {
                     continue;
                 }
                 if (runner.isOnline()) {
+                    clearPreferenceSelectors(runner);
                     runner.teleport(runnerLocation);
                     runner.setGameMode(GameMode.ADVENTURE);
                     restorePlayerVitals(runner);
@@ -1670,6 +1808,7 @@ public class GameManager {
         }
         for (Player player : players) {
             removeExitToken(player);
+            clearPreferenceSelectors(player);
         }
     }
 
@@ -1682,6 +1821,155 @@ public class GameManager {
             return false;
         }
         return meta.getPersistentDataContainer().has(exitTokenKey, PersistentDataType.BYTE);
+    }
+
+    private void givePreferenceSelectors(Player player, RolePreference selected) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        PlayerInventory inventory = player.getInventory();
+        if (!canChoosePreference(player)) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (clearPreferenceSelectors(inventory)) {
+                    player.updateInventory();
+                }
+            });
+            return;
+        }
+
+        RolePreference applied = selected != null ? selected : RolePreference.ANY;
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            clearPreferenceSelectors(inventory);
+            inventory.setItem(PREFERENCE_BEAST_SLOT, createPreferenceSelector(RolePreference.BEAST, applied));
+            inventory.setItem(PREFERENCE_RUNNER_SLOT, createPreferenceSelector(RolePreference.RUNNER, applied));
+            player.updateInventory();
+        });
+    }
+
+    private ItemStack createPreferenceSelector(RolePreference type, RolePreference selected) {
+        Material material = type == RolePreference.BEAST ? Material.RED_WOOL : Material.GREEN_WOOL;
+        ItemStack item = new ItemStack(material, 1);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return item;
+        }
+
+        boolean chosen = selected == type;
+        String title = (type == RolePreference.BEAST ? ChatColor.DARK_RED : ChatColor.GREEN)
+                + "" + ChatColor.BOLD + (type == RolePreference.BEAST ? "Beast" : "Runner") + " Preference";
+
+        List<String> lore = new ArrayList<>();
+        if (chosen) {
+            lore.add(ChatColor.GOLD + "Selected");
+            lore.add(ChatColor.GRAY + "Right-click again to clear.");
+            meta.addEnchant(Enchantment.UNBREAKING, 1, true);
+        } else {
+            lore.add(ChatColor.GRAY + "Right-click to favor this role.");
+            lore.add(ChatColor.DARK_GRAY + "Right-click again to reset.");
+        }
+
+        meta.setDisplayName(title);
+        meta.setLore(lore);
+        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_UNBREAKABLE);
+        meta.getPersistentDataContainer().set(preferenceKey, PersistentDataType.STRING, type.name());
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private void clearPreferenceSelectors(Player player) {
+        if (player == null) {
+            return;
+        }
+        boolean changed = clearPreferenceSelectors(player.getInventory());
+        if (changed) {
+            player.updateInventory();
+        }
+    }
+
+    private boolean clearPreferenceSelectors(PlayerInventory inventory) {
+        if (inventory == null) {
+            return false;
+        }
+        boolean changed = false;
+        List<Integer> slotsToClear = new ArrayList<>();
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            ItemStack item = inventory.getItem(slot);
+            if (isPreferenceSelector(item)) {
+                slotsToClear.add(slot);
+            }
+        }
+        for (int slot : slotsToClear) {
+            inventory.clear(slot);
+            changed = true;
+        }
+        return changed;
+    }
+
+    private RolePreference readPreferenceType(ItemStack stack) {
+        if (stack == null || stack.getType().isAir()) {
+            return null;
+        }
+        ItemMeta meta = stack.getItemMeta();
+        if (meta == null) {
+            return null;
+        }
+        var container = meta.getPersistentDataContainer();
+        if (!container.has(preferenceKey, PersistentDataType.STRING)) {
+            return null;
+        }
+        String stored = container.get(preferenceKey, PersistentDataType.STRING);
+        if (stored == null) {
+            return null;
+        }
+        try {
+            return RolePreference.valueOf(stored);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    public boolean isPreferenceSelector(ItemStack stack) {
+        RolePreference type = readPreferenceType(stack);
+        return type == RolePreference.BEAST || type == RolePreference.RUNNER;
+    }
+
+    public boolean isManagedItem(ItemStack stack) {
+        return isExitToken(stack) || isPreferenceSelector(stack);
+    }
+
+    public void handlePreferenceItemUse(Player player, ItemStack stack) {
+        RolePreference desired = readPreferenceType(stack);
+        if (player == null || desired == null) {
+            return;
+        }
+        if (!canChoosePreference(player)) {
+            send(player, ChatColor.RED + "You do not have permission to choose a role preference.");
+            return;
+        }
+
+        String key = findArenaByPlayer(player.getUniqueId());
+        if (key == null) {
+            send(player, ChatColor.RED + "Join an arena queue before choosing a preference.");
+            return;
+        }
+
+        ActiveArena activeArena = activeArenas.get(key);
+        if (activeArena == null) {
+            return;
+        }
+
+        RolePreference current = activeArena.getPreference(player.getUniqueId());
+        RolePreference next;
+        if (current == desired) {
+            next = RolePreference.ANY;
+            send(player, ChatColor.YELLOW + "Preference cleared. Odds returned to " + formatPreference(next) + ChatColor.YELLOW + ".");
+        } else {
+            next = desired;
+            send(player, ChatColor.GOLD + "Preference set to " + formatPreference(next) + ChatColor.GOLD + ".");
+        }
+
+        activeArena.setPreference(player.getUniqueId(), next);
+        givePreferenceSelectors(player, next);
     }
 
     private ItemStack createHealingPotion() {
@@ -1787,6 +2075,22 @@ public class GameManager {
     }
 
     private void cleanupArena(String key, ActiveArena activeArena, boolean restoreWalls) {
+        String arenaName = null;
+        if (activeArena != null && activeArena.getArena() != null) {
+            arenaName = activeArena.getArena().getName();
+        } else if (key != null) {
+            arenaName = key;
+        }
+        if (activeArena == null) {
+            if (arenaName != null && !arenaName.trim().isEmpty()) {
+                notifyStatusListeners(arenaName);
+            }
+            if (key != null) {
+                activeArenas.remove(key);
+            }
+            return;
+        }
+
         activeArena.cancelTasks();
         clearBeastEffects(activeArena);
         if (restoreWalls) {
@@ -1794,11 +2098,13 @@ public class GameManager {
             activeArena.clearPlayers();
             activeArena.setRunning(false);
             activeArenas.remove(key);
+            notifyStatusListeners(arenaName);
             return;
         }
 
         activeArena.clearPlayers();
         activeArena.setRunning(false);
+        notifyStatusListeners(arenaName);
     }
 
     private void clearBeastEffects(ActiveArena activeArena) {
@@ -1861,6 +2167,44 @@ public class GameManager {
         return count;
     }
 
+    private double calculateBeastWeight(Player player, RolePreference preference) {
+        PlayerTier tier = determineTier(player);
+        return switch (tier) {
+            case NJOG -> switch (preference) {
+                case BEAST -> 1.6d;
+                case RUNNER -> 0.4d;
+                default -> 1.0d;
+            };
+            case VIP -> switch (preference) {
+                case BEAST -> 1.4d;
+                case RUNNER -> 0.6d;
+                default -> 1.0d;
+            };
+            case NORMAL -> 1.0d;
+        };
+    }
+
+    private double fallbackBeastWeight(Player player) {
+        return switch (determineTier(player)) {
+            case NJOG -> 1.6d;
+            case VIP -> 1.4d;
+            case NORMAL -> 1.0d;
+        };
+    }
+
+    private PlayerTier determineTier(Player player) {
+        if (player == null) {
+            return PlayerTier.NORMAL;
+        }
+        if (player.hasPermission(PERM_PREFERENCE_NJOG)) {
+            return PlayerTier.NJOG;
+        }
+        if (player.hasPermission(PERM_PREFERENCE_VIP)) {
+            return PlayerTier.VIP;
+        }
+        return PlayerTier.NORMAL;
+    }
+
     private void send(Player player, String message) {
         player.sendMessage(prefix + message);
     }
@@ -1902,6 +2246,7 @@ public class GameManager {
 
     public static final class ArenaStatus {
         private final String arenaName;
+        private final boolean available;
         private final boolean complete;
         private final int playerCount;
         private final int capacity;
@@ -1909,9 +2254,10 @@ public class GameManager {
         private final boolean selecting;
         private final boolean matchActive;
 
-        private ArenaStatus(String arenaName, boolean complete, int playerCount, int capacity,
+        private ArenaStatus(String arenaName, boolean available, boolean complete, int playerCount, int capacity,
                              boolean running, boolean selecting, boolean matchActive) {
             this.arenaName = arenaName;
+            this.available = available;
             this.complete = complete;
             this.playerCount = playerCount;
             this.capacity = capacity;
@@ -1921,11 +2267,15 @@ public class GameManager {
         }
 
         private static ArenaStatus unavailable(String arenaName) {
-            return new ArenaStatus(arenaName, false, 0, -1, false, false, false);
+            return new ArenaStatus(arenaName, false, false, 0, -1, false, false, false);
         }
 
         public String getArenaName() {
             return arenaName;
+        }
+
+        public boolean isAvailable() {
+            return available;
         }
 
         public boolean isComplete() {
@@ -2207,5 +2557,11 @@ public class GameManager {
         private void setBeastWallSnapshot(List<BlockState> beastWallSnapshot) {
             this.beastWallSnapshot = beastWallSnapshot;
         }
+    }
+
+    private enum PlayerTier {
+        NORMAL,
+        VIP,
+        NJOG
     }
 }

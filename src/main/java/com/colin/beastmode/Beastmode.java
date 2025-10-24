@@ -92,7 +92,7 @@ public final class Beastmode extends JavaPlugin {
         pluginManager.registerEvents(new ChatInputListener(this, setupSessionManager), this);
         pluginManager.registerEvents(new ArenaMenuListener(arenaMenu), this);
         pluginManager.registerEvents(new ArenaEditMenuListener(arenaEditMenu), this);
-        pluginManager.registerEvents(new SignListener(arenaStorage, gameManager, messagePrefix), this);
+    pluginManager.registerEvents(new SignListener(this, arenaStorage, gameManager, messagePrefix), this);
         pluginManager.registerEvents(new GameListener(gameManager), this);
     }
 }

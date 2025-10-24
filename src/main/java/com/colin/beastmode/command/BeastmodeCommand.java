@@ -182,6 +182,10 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
                 sessionManager.sendPrefixed(player, ChatColor.RED + "Role must be '" + ROLE_RUNNER + "', '" + ROLE_BEAST + "', or '" + ROLE_ANY + "'.");
                 return;
             }
+            if (preference != GameManager.RolePreference.ANY && !gameManager.canChoosePreference(player)) {
+                sessionManager.sendPrefixed(player, ChatColor.RED + "Only VIP or NJOG players can choose a role preference. Joining with random role.");
+                preference = GameManager.RolePreference.ANY;
+            }
         }
         gameManager.joinArena(player, arenaName, preference);
     }
@@ -229,7 +233,13 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 3 && sub.equals(SUB_JOIN)) {
-            List<String> options = List.of(ROLE_RUNNER, ROLE_BEAST, ROLE_ANY);
+            Player player = (Player) sender;
+            List<String> options;
+            if (gameManager.canChoosePreference(player)) {
+                options = List.of(ROLE_RUNNER, ROLE_BEAST, ROLE_ANY);
+            } else {
+                options = List.of(ROLE_ANY);
+            }
             return StringUtil.copyPartialMatches(args[2], options, new ArrayList<>());
         }
 

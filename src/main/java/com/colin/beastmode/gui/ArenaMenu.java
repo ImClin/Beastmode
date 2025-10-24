@@ -90,6 +90,7 @@ public class ArenaMenu {
             lore.add(statusLine("Beast spawn", arena.getBeastSpawn() != null));
             lore.add(statusLine("Runner wall delay", arena.getRunnerWallDelaySeconds() >= 0));
             lore.add(statusLine("Beast release delay", arena.getBeastReleaseDelaySeconds() >= 0));
+            lore.add(ChatColor.GRAY + "Beast speed level: " + ChatColor.AQUA + arena.getBeastSpeedLevel());
             lore.add(statusLine("Finish button", arena.getFinishButton() != null));
             lore.add(ChatColor.GRAY + "Status: " + (arena.isComplete() ? ChatColor.GREEN + "Ready" : ChatColor.YELLOW + "Incomplete"));
             lore.add("");

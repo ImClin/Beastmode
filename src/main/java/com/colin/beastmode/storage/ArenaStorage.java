@@ -63,6 +63,7 @@ public class ArenaStorage {
         Location waitingSpawn = readLocation(section.getConfigurationSection("waitingSpawn"));
             int runnerDelay = section.getInt("runnerWallDelaySeconds", -1);
             int beastDelay = section.getInt("beastReleaseDelaySeconds", -1);
+            int beastSpeed = Math.max(section.getInt("beastSpeedLevel", 1), 0);
         int minRunners = Math.max(section.getInt("minRunners", 1), 1);
         int maxRunners = section.getInt("maxRunners", 0);
         if (maxRunners < 0) {
@@ -84,6 +85,7 @@ public class ArenaStorage {
             .waitingSpawn(waitingSpawn)
                     .runnerWallDelaySeconds(runnerDelay)
                     .beastReleaseDelaySeconds(beastDelay)
+            .beastSpeedLevel(beastSpeed)
             .minRunners(minRunners)
             .maxRunners(maxRunners)
                     .build();
@@ -106,6 +108,7 @@ public class ArenaStorage {
     writeLocation(section.createSection("waitingSpawn"), arena.getWaitingSpawn());
         section.set("runnerWallDelaySeconds", arena.getRunnerWallDelaySeconds());
         section.set("beastReleaseDelaySeconds", arena.getBeastReleaseDelaySeconds());
+        section.set("beastSpeedLevel", arena.getBeastSpeedLevel());
     section.set("minRunners", arena.getMinRunners());
     section.set("maxRunners", arena.getMaxRunners());
 
@@ -170,6 +173,15 @@ public class ArenaStorage {
             return;
         }
         ArenaDefinition updated = arena.withBeastReleaseDelay(seconds);
+        saveArena(updated);
+    }
+
+    public void updateBeastSpeedLevel(String arenaName, int level) {
+        ArenaDefinition arena = getArena(arenaName);
+        if (arena == null) {
+            return;
+        }
+        ArenaDefinition updated = arena.withBeastSpeedLevel(level);
         saveArena(updated);
     }
 

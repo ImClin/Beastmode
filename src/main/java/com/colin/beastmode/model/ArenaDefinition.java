@@ -17,6 +17,7 @@ public class ArenaDefinition {
     private final Cuboid finishRegion;
     private final int minRunners;
     private final int maxRunners;
+    private final int beastSpeedLevel;
 
     private ArenaDefinition(Builder builder) {
         this.name = builder.name;
@@ -35,6 +36,7 @@ public class ArenaDefinition {
             sanitizedMax = this.minRunners;
         }
         this.maxRunners = sanitizedMax;
+        this.beastSpeedLevel = Math.max(builder.beastSpeedLevel, 0);
     }
 
     public String getName() {
@@ -69,6 +71,10 @@ public class ArenaDefinition {
         return beastReleaseDelaySeconds;
     }
 
+    public int getBeastSpeedLevel() {
+        return beastSpeedLevel;
+    }
+
     public Location getFinishButton() {
         return finishButton != null ? finishButton.clone() : null;
     }
@@ -85,6 +91,7 @@ public class ArenaDefinition {
         return runnerWall != null && beastWall != null && (finishButton != null || finishRegion != null)
                 && runnerSpawn != null && beastSpawn != null
                 && runnerWallDelaySeconds >= 0 && beastReleaseDelaySeconds >= 0
+        && beastSpeedLevel >= 0
                 && minRunners >= 1
                 && maxRunners >= 0
                 && (maxRunners == 0 || maxRunners >= minRunners);
@@ -124,6 +131,7 @@ public class ArenaDefinition {
         private Cuboid finishRegion;
         private int minRunners = 1;
         private int maxRunners = 0;
+    private int beastSpeedLevel = 1;
 
         public Builder(String name) {
             this.name = name;
@@ -164,6 +172,11 @@ public class ArenaDefinition {
             return this;
         }
 
+        public Builder beastSpeedLevel(int speedLevel) {
+            this.beastSpeedLevel = speedLevel;
+            return this;
+        }
+
         public Builder finishButton(Location finishButton) {
             this.finishButton = finishButton;
             return this;
@@ -198,6 +211,7 @@ public class ArenaDefinition {
                 .waitingSpawn(location != null ? location.clone() : null)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
@@ -214,6 +228,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
@@ -230,6 +245,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
@@ -246,6 +262,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
@@ -262,6 +279,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+        .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
@@ -278,6 +296,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(seconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
@@ -294,6 +313,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(seconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
@@ -310,6 +330,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(location != null ? location.clone() : null)
                 .finishRegion(null)
                 .minRunners(minRunners)
@@ -326,6 +347,7 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(value)
@@ -342,10 +364,28 @@ public class ArenaDefinition {
                 .waitingSpawn(waitingSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(beastSpeedLevel)
                 .finishButton(finishButton)
                 .finishRegion(finishRegion)
                 .minRunners(minRunners)
                 .maxRunners(value)
+                .build();
+    }
+
+    public ArenaDefinition withBeastSpeedLevel(int level) {
+        return builder(name)
+                .runnerWall(runnerWall)
+                .beastWall(beastWall)
+                .runnerSpawn(runnerSpawn)
+                .beastSpawn(beastSpawn)
+                .waitingSpawn(waitingSpawn)
+                .runnerWallDelaySeconds(runnerWallDelaySeconds)
+                .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+                .beastSpeedLevel(level)
+                .finishButton(finishButton)
+                .finishRegion(finishRegion)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 

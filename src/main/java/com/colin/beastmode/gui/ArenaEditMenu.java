@@ -52,10 +52,11 @@ public class ArenaEditMenu {
         inventory.setItem(14, beastWallItem());
         inventory.setItem(15, finishButtonItem(arena));
 
-        inventory.setItem(19, runnerDelayItem(arena));
-        inventory.setItem(20, beastDelayItem(arena));
-        inventory.setItem(21, minRunnersItem(arena));
-        inventory.setItem(22, maxRunnersItem(arena));
+    inventory.setItem(19, runnerDelayItem(arena));
+    inventory.setItem(20, beastDelayItem(arena));
+    inventory.setItem(21, minRunnersItem(arena));
+    inventory.setItem(22, maxRunnersItem(arena));
+    inventory.setItem(23, beastSpeedItem(arena));
 
         inventory.setItem(31, reconfigureItem());
         inventory.setItem(35, closeItem());
@@ -97,6 +98,7 @@ public class ArenaEditMenu {
             case STONE_BUTTON, POLISHED_BLACKSTONE_BUTTON -> handleFinishButton(player, arena);
             case REPEATER -> handleRunnerDelay(player, arena);
             case COMPARATOR -> handleBeastDelay(player, arena);
+            case SUGAR -> handleBeastSpeed(player, arena);
             case SLIME_BALL -> handleMinRunners(player, arena);
             case MAGMA_CREAM -> handleMaxRunners(player, arena);
             case WRITABLE_BOOK -> handleReconfigure(player, arena);
@@ -191,6 +193,13 @@ public class ArenaEditMenu {
         return simpleItem(Material.COMPARATOR, ChatColor.DARK_RED + "Beast Release Delay",
                 ChatColor.GRAY + "Current: " + ChatColor.AQUA + value,
                 ChatColor.YELLOW + "Click and enter a new value in chat.");
+    }
+
+    private ItemStack beastSpeedItem(ArenaDefinition arena) {
+        String value = String.valueOf(arena.getBeastSpeedLevel());
+        return simpleItem(Material.SUGAR, ChatColor.AQUA + "Beast Speed Level",
+                ChatColor.GRAY + "Current: " + ChatColor.AQUA + value,
+                ChatColor.YELLOW + "Click and enter a new value in chat." + ChatColor.GRAY + " (0 = none)");
     }
 
     private ItemStack minRunnersItem(ArenaDefinition arena) {
@@ -303,6 +312,13 @@ public class ArenaEditMenu {
         player.closeInventory();
         if (sessionManager.beginBeastDelayEdit(player, arena.getName())) {
             player.sendMessage(prefix + ChatColor.YELLOW + "Enter the new beast release delay in chat.");
+        }
+    }
+
+    private void handleBeastSpeed(Player player, ArenaDefinition arena) {
+        player.closeInventory();
+        if (sessionManager.beginBeastSpeedEdit(player, arena.getName())) {
+            player.sendMessage(prefix + ChatColor.YELLOW + "Enter the new beast speed level in chat.");
         }
     }
 

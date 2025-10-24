@@ -21,6 +21,7 @@ public class SetupSession {
     private Location beastSpawn;
     private Integer runnerWallDelaySeconds;
     private Integer beastReleaseDelaySeconds;
+    private Integer beastSpeedLevel;
     private Integer minRunners;
     private Integer maxRunners;
 
@@ -91,6 +92,10 @@ public class SetupSession {
         this.beastReleaseDelaySeconds = seconds;
     }
 
+    public void setBeastSpeedLevel(int speedLevel) {
+        this.beastSpeedLevel = speedLevel;
+    }
+
     public void setMinRunners(int minRunners) {
         this.minRunners = minRunners;
     }
@@ -135,6 +140,10 @@ public class SetupSession {
         return beastReleaseDelaySeconds;
     }
 
+    public Integer getBeastSpeedLevel() {
+        return beastSpeedLevel;
+    }
+
     public Integer getMinRunners() {
         return minRunners;
     }
@@ -167,6 +176,7 @@ public class SetupSession {
                 .beastSpawn(beastSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
+        .beastSpeedLevel(beastSpeedLevel != null ? beastSpeedLevel : 1)
         .minRunners(minRunners)
         .maxRunners(maxRunners)
                 .build();
@@ -180,6 +190,7 @@ public class SetupSession {
                 && beastSpawn != null
                 && runnerWallDelaySeconds != null
         && beastReleaseDelaySeconds != null
+        && beastSpeedLevel != null
         && minRunners != null
         && maxRunners != null;
     }
