@@ -11,9 +11,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
-import org.bukkit.World;
 import org.bukkit.block.Block;
-import org.bukkit.block.BlockState;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
@@ -50,6 +48,7 @@ public class GameManager {
     private final ItemStack exitTokenTemplate;
     private final List<Consumer<String>> statusListeners = new CopyOnWriteArrayList<>();
     private final PlayerSupportService playerSupport;
+    private final ArenaBarrierService barrierService;
     private static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     private static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
@@ -76,6 +75,7 @@ public class GameManager {
         this.exitTokenTemplate = createExitToken();
     this.playerSupport = new PlayerSupportService(plugin, prefix, LONG_EFFECT_DURATION_TICKS,
         exitTokenKey, preferenceKey, exitTokenTemplate);
+    this.barrierService = new ArenaBarrierService();
     }
 
     public void registerStatusListener(Consumer<String> listener) {
@@ -1413,9 +1413,9 @@ public class GameManager {
         if (!activeArena.isRunnerWallOpened()) {
             if (arena.getRunnerWall() != null) {
                 if (activeArena.getRunnerWallSnapshot() == null) {
-                    activeArena.setRunnerWallSnapshot(captureBlockStates(arena.getRunnerWall()));
+                    activeArena.setRunnerWallSnapshot(barrierService.capture(arena.getRunnerWall()));
                 }
-                setCuboidToAir(arena.getRunnerWall());
+                barrierService.clear(arena.getRunnerWall());
             }
             activeArena.setRunnerWallOpened(true);
             activeArena.releaseDamageProtectionAfter(1000L);
@@ -1426,9 +1426,9 @@ public class GameManager {
         if (!activeArena.isBeastWallOpened()) {
             if (arena.getBeastWall() != null) {
                 if (activeArena.getBeastWallSnapshot() == null) {
-                    activeArena.setBeastWallSnapshot(captureBlockStates(arena.getBeastWall()));
+                    activeArena.setBeastWallSnapshot(barrierService.capture(arena.getBeastWall()));
                 }
-                setCuboidToAir(arena.getBeastWall());
+                barrierService.clear(arena.getBeastWall());
             }
             activeArena.setBeastWallOpened(true);
         }
@@ -1615,71 +1615,6 @@ public class GameManager {
         return ChatColor.AQUA + arenaName + ChatColor.RESET;
     }
 
-    private void setCuboidToAir(Cuboid cuboid) {
-        if (cuboid == null) {
-            return;
-        }
-        World world = cuboid.getWorld();
-        if (world == null) {
-            return;
-        }
-        Location min = cuboid.getMin();
-        Location max = cuboid.getMax();
-        int minX = (int) Math.floor(min.getX());
-        int minY = (int) Math.floor(min.getY());
-        int minZ = (int) Math.floor(min.getZ());
-        int maxX = (int) Math.floor(max.getX());
-        int maxY = (int) Math.floor(max.getY());
-        int maxZ = (int) Math.floor(max.getZ());
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    Block block = world.getBlockAt(x, y, z);
-                    block.setType(Material.AIR, false);
-                }
-            }
-        }
-    }
-
-    private List<BlockState> captureBlockStates(Cuboid cuboid) {
-        List<BlockState> states = new ArrayList<>();
-        if (cuboid == null) {
-            return states;
-        }
-        World world = cuboid.getWorld();
-        if (world == null) {
-            return states;
-        }
-        Location min = cuboid.getMin();
-        Location max = cuboid.getMax();
-        int minX = (int) Math.floor(min.getX());
-        int minY = (int) Math.floor(min.getY());
-        int minZ = (int) Math.floor(min.getZ());
-        int maxX = (int) Math.floor(max.getX());
-        int maxY = (int) Math.floor(max.getY());
-        int maxZ = (int) Math.floor(max.getZ());
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    Block block = world.getBlockAt(x, y, z);
-                    states.add(block.getState());
-                }
-            }
-        }
-        return states;
-    }
-
-    private void restoreBlockStates(List<BlockState> states) {
-        if (states == null) {
-            return;
-        }
-        for (BlockState state : states) {
-            if (state != null) {
-                state.update(true, false);
-            }
-        }
-    }
-
     private void teleportParticipants(ArenaDefinition arena, List<Player> players, Player beast) {
         Location beastLocation = arena.getBeastSpawn().clone();
         Location runnerLocation = arena.getRunnerSpawn().clone();
@@ -1831,11 +1766,11 @@ public class GameManager {
 
     private void resetArenaState(ActiveArena activeArena) {
         if (activeArena.getRunnerWallSnapshot() != null) {
-            restoreBlockStates(activeArena.getRunnerWallSnapshot());
+            barrierService.restore(activeArena.getRunnerWallSnapshot());
             activeArena.setRunnerWallSnapshot(null);
         }
         if (activeArena.getBeastWallSnapshot() != null) {
-            restoreBlockStates(activeArena.getBeastWallSnapshot());
+            barrierService.restore(activeArena.getBeastWallSnapshot());
             activeArena.setBeastWallSnapshot(null);
         }
         activeArena.setRunnerWallOpened(false);
