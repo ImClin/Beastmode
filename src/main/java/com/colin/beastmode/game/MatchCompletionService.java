@@ -5,24 +5,17 @@ import org.bukkit.Location;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 
-import java.util.Map;
-import java.util.UUID;
-import java.util.function.Function;
-
 /**
  * Detects match completion triggers such as finish regions or buttons.
  */
 final class MatchCompletionService {
 
-    private final Map<String, ActiveArena> activeArenas;
-    private final Function<UUID, String> arenaLookup;
+    private final ActiveArenaDirectory arenaDirectory;
     private final ArenaDepartureService departures;
 
-    MatchCompletionService(Map<String, ActiveArena> activeArenas,
-                           Function<UUID, String> arenaLookup,
+    MatchCompletionService(ActiveArenaDirectory arenaDirectory,
                            ArenaDepartureService departures) {
-        this.activeArenas = activeArenas;
-        this.arenaLookup = arenaLookup;
+        this.arenaDirectory = arenaDirectory;
         this.departures = departures;
     }
 
@@ -37,12 +30,12 @@ final class MatchCompletionService {
             return;
         }
 
-        String key = arenaLookup.apply(player.getUniqueId());
+        String key = arenaDirectory.findArenaByPlayer(player.getUniqueId());
         if (key == null) {
             return;
         }
 
-        ActiveArena activeArena = activeArenas.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null || !activeArena.isMatchActive()) {
             return;
         }
@@ -77,12 +70,12 @@ final class MatchCompletionService {
             return;
         }
 
-        String key = arenaLookup.apply(player.getUniqueId());
+        String key = arenaDirectory.findArenaByPlayer(player.getUniqueId());
         if (key == null) {
             return;
         }
 
-        ActiveArena activeArena = activeArenas.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null || !activeArena.isMatchActive()) {
             return;
         }

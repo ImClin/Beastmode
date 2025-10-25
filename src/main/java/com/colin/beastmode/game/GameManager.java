@@ -13,7 +13,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -21,7 +20,7 @@ import java.util.function.Consumer;
 public class GameManager {
 
     private final ArenaStorage arenaStorage;
-    private final Map<String, ActiveArena> activeArenas = new ConcurrentHashMap<>();
+    private final ActiveArenaDirectory arenaDirectory;
     private final String prefix;
     private final NamespacedKey exitTokenKey;
     private final NamespacedKey preferenceKey;
@@ -67,12 +66,14 @@ public class GameManager {
         this.exitTokenKey = new NamespacedKey(plugin, "exit_token");
         this.preferenceKey = new NamespacedKey(plugin, "preference_selector");
         this.exitTokenTemplate = createExitToken();
+        ConcurrentHashMap<String, ActiveArena> arenaBacking = new ConcurrentHashMap<>();
+        this.arenaDirectory = new ActiveArenaDirectory(arenaBacking);
         this.statusService = new ArenaStatusService();
         this.playerSupport = new PlayerSupportService(plugin, prefix, LONG_EFFECT_DURATION_TICKS,
             exitTokenKey, preferenceKey, exitTokenTemplate);
         this.waitingService = new ArenaWaitingService(this.playerSupport, this.prefix);
         this.barrierService = new ArenaBarrierService();
-        this.arenaLifecycle = new ArenaLifecycleService(this.activeArenas, this.barrierService, statusService::notifyArenaName);
+        this.arenaLifecycle = new ArenaLifecycleService(this.arenaDirectory, this.barrierService, statusService::notifyArenaName);
         this.countdowns = new CountdownService(plugin);
         this.roleSelection = new RoleSelectionService(PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
         this.matchSetup = new MatchSetupService(this.playerSupport, prefix);
@@ -83,17 +84,17 @@ public class GameManager {
             messaging, prefix, LONG_EFFECT_DURATION_TICKS);
         this.selectionService = new MatchSelectionService(this.countdowns, this.roleSelection, this.matchSetup,
             this.messaging, this.matchFlow, this.waitingService, this.arenaLifecycle, statusService::notifyArenaStatus);
-        this.preferenceService = new PlayerPreferenceService(this.activeArenas, this::findArenaByPlayer,
+        this.preferenceService = new PlayerPreferenceService(this.arenaDirectory,
             this.playerSupport, this.roleSelection, this.prefix);
         this.departureService = new ArenaDepartureService(this.prefix, this.playerSupport, this.playerTransitions,
             this.waitingService, this.arenaLifecycle, this.matchOutcome, statusService::notifyArenaStatus);
-        this.completionService = new MatchCompletionService(this.activeArenas, this::findArenaByPlayer, this.departureService);
-        this.eliminationService = new MatchEliminationService(this.activeArenas, this::findArenaByPlayer,
+        this.completionService = new MatchCompletionService(this.arenaDirectory, this.departureService);
+        this.eliminationService = new MatchEliminationService(this.arenaDirectory,
             this.playerSupport, this.playerTransitions, this.departureService);
-        this.orchestration = new MatchOrchestrationService(this.activeArenas, this.arenaStorage, this.arenaLifecycle,
+        this.orchestration = new MatchOrchestrationService(this.arenaDirectory, this.arenaStorage, this.arenaLifecycle,
             this.waitingService, this.selectionService, this.departureService, this.statusService, this.prefix);
-        this.queueService = new ArenaQueueService(this.arenaStorage, this.activeArenas,
-            this.playerSupport, this.roleSelection, this.waitingService, this.prefix);
+        this.queueService = new ArenaQueueService(this.arenaStorage, this.arenaDirectory,
+            this.playerSupport, this.roleSelection, this.waitingService, this.orchestration, this.statusService, this.prefix);
     }
 
     public void registerStatusListener(Consumer<String> listener) {
@@ -113,7 +114,7 @@ public class GameManager {
     }
 
     public void joinArena(Player player, String arenaName, RolePreference preference) {
-        queueService.join(this, player, arenaName, preference);
+    queueService.join(player, arenaName, preference);
     }
 
     public void handlePlayerMove(Player player, Location from, Location to) {
@@ -139,7 +140,7 @@ public class GameManager {
             return;
         }
 
-        ActiveArena activeArena = activeArenas.get(key);
+    ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return;
         }
@@ -165,7 +166,7 @@ public class GameManager {
             return false;
         }
 
-        ActiveArena activeArena = activeArenas.get(key);
+    ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return false;
         }
@@ -182,7 +183,7 @@ public class GameManager {
             return false;
         }
 
-        ActiveArena activeArena = activeArenas.get(key);
+    ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return false;
         }
@@ -203,12 +204,7 @@ public class GameManager {
     }
 
     String findArenaByPlayer(UUID uuid) {
-        for (Map.Entry<String, ActiveArena> entry : activeArenas.entrySet()) {
-            if (entry.getValue().contains(uuid)) {
-                return entry.getKey();
-            }
-        }
-        return null;
+        return arenaDirectory.findArenaByPlayer(uuid);
     }
 
     public boolean isPlayerInArena(UUID uuid) {

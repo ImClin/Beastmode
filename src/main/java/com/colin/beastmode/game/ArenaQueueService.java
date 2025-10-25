@@ -6,7 +6,6 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 
 import java.util.Locale;
-import java.util.Map;
 
 /**
  * Coordinates queue enrolment and waiting-room preparation for arenas.
@@ -14,28 +13,33 @@ import java.util.Map;
 final class ArenaQueueService {
 
     private final ArenaStorage arenaStorage;
-    private final Map<String, ActiveArena> activeArenas;
+    private final ActiveArenaDirectory arenaDirectory;
     private final PlayerSupportService playerSupport;
     private final RoleSelectionService roleSelection;
     private final ArenaWaitingService waitingService;
+    private final MatchOrchestrationService orchestration;
+    private final ArenaStatusService statusService;
     private final String prefix;
 
     ArenaQueueService(ArenaStorage arenaStorage,
-                      Map<String, ActiveArena> activeArenas,
+                      ActiveArenaDirectory arenaDirectory,
                       PlayerSupportService playerSupport,
                       RoleSelectionService roleSelection,
                       ArenaWaitingService waitingService,
+                      MatchOrchestrationService orchestration,
+                      ArenaStatusService statusService,
                       String prefix) {
         this.arenaStorage = arenaStorage;
-        this.activeArenas = activeArenas;
+        this.arenaDirectory = arenaDirectory;
         this.playerSupport = playerSupport;
         this.roleSelection = roleSelection;
         this.waitingService = waitingService;
+        this.orchestration = orchestration;
+        this.statusService = statusService;
         this.prefix = prefix;
     }
 
-    void join(GameManager manager,
-              Player player,
+    void join(Player player,
               String arenaName,
               GameManager.RolePreference desiredPreference) {
         if (player == null) {
@@ -61,7 +65,7 @@ final class ArenaQueueService {
             return;
         }
 
-        if (manager.findArenaByPlayer(player.getUniqueId()) != null) {
+        if (arenaDirectory.findArenaByPlayer(player.getUniqueId()) != null) {
             send(player, ChatColor.RED + "You are already queued for an arena.");
             return;
         }
@@ -69,7 +73,7 @@ final class ArenaQueueService {
         GameManager.RolePreference preference = sanitizePreference(player, desiredPreference);
 
         String key = arena.getName().toLowerCase(Locale.ENGLISH);
-        ActiveArena activeArena = activeArenas.computeIfAbsent(key, k -> new ActiveArena(arena));
+    ActiveArena activeArena = arenaDirectory.computeIfAbsent(key, () -> new ActiveArena(arena));
         if (activeArena.isMatchActive()) {
             send(player, ChatColor.RED + "That arena is already in a hunt. Try again in a moment.");
             return;
@@ -87,7 +91,7 @@ final class ArenaQueueService {
         activeArena.setPreference(player.getUniqueId(), preference);
         if (!added) {
             handleExistingParticipant(player, activeArena, preference);
-            manager.notifyArenaStatus(activeArena);
+            statusService.notifyArenaStatus(activeArena);
             return;
         }
 
@@ -104,13 +108,13 @@ final class ArenaQueueService {
             } else {
                 send(player, ChatColor.YELLOW + "You slipped in before the gates drop. Hold tight!");
             }
-            manager.maybeStartCountdown(key, activeArena);
-            manager.notifyArenaStatus(activeArena);
+            orchestration.maybeStartCountdown(key, activeArena);
+            statusService.notifyArenaStatus(activeArena);
             return;
         }
 
-        manager.startMatch(key, activeArena);
-        manager.notifyArenaStatus(activeArena);
+        orchestration.startMatch(key, activeArena);
+        statusService.notifyArenaStatus(activeArena);
     }
 
     private GameManager.RolePreference sanitizePreference(Player player, GameManager.RolePreference preference) {

@@ -3,28 +3,23 @@ package com.colin.beastmode.game;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
-import java.util.Map;
 import java.util.UUID;
-import java.util.function.Function;
 
 /**
  * Coordinates player death handling for active matches.
  */
 final class MatchEliminationService {
 
-    private final Map<String, ActiveArena> activeArenas;
-    private final Function<UUID, String> arenaLookup;
+    private final ActiveArenaDirectory arenaDirectory;
     private final PlayerSupportService playerSupport;
     private final PlayerTransitionService transitions;
     private final ArenaDepartureService departures;
 
-    MatchEliminationService(Map<String, ActiveArena> activeArenas,
-                            Function<UUID, String> arenaLookup,
+    MatchEliminationService(ActiveArenaDirectory arenaDirectory,
                             PlayerSupportService playerSupport,
                             PlayerTransitionService transitions,
                             ArenaDepartureService departures) {
-        this.activeArenas = activeArenas;
-        this.arenaLookup = arenaLookup;
+        this.arenaDirectory = arenaDirectory;
         this.playerSupport = playerSupport;
         this.transitions = transitions;
         this.departures = departures;
@@ -36,12 +31,12 @@ final class MatchEliminationService {
         }
 
         UUID uuid = player.getUniqueId();
-        String key = arenaLookup.apply(uuid);
+        String key = arenaDirectory.findArenaByPlayer(uuid);
         if (key == null) {
             return;
         }
 
-        ActiveArena activeArena = activeArenas.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return;
         }

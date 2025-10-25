@@ -4,28 +4,23 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
-import java.util.Map;
 import java.util.UUID;
-import java.util.function.Function;
 
 /**
  * Manages player preference item interactions and messaging.
  */
 final class PlayerPreferenceService {
 
-    private final Map<String, ActiveArena> activeArenas;
-    private final Function<UUID, String> arenaLookup;
+    private final ActiveArenaDirectory arenaDirectory;
     private final PlayerSupportService playerSupport;
     private final RoleSelectionService roleSelection;
     private final String prefix;
 
-    PlayerPreferenceService(Map<String, ActiveArena> activeArenas,
-                            Function<UUID, String> arenaLookup,
+    PlayerPreferenceService(ActiveArenaDirectory arenaDirectory,
                             PlayerSupportService playerSupport,
                             RoleSelectionService roleSelection,
                             String prefix) {
-        this.activeArenas = activeArenas;
-        this.arenaLookup = arenaLookup;
+        this.arenaDirectory = arenaDirectory;
         this.playerSupport = playerSupport;
         this.roleSelection = roleSelection;
         this.prefix = prefix;
@@ -46,13 +41,13 @@ final class PlayerPreferenceService {
             return;
         }
 
-        String key = arenaLookup.apply(player.getUniqueId());
+        String key = arenaDirectory.findArenaByPlayer(player.getUniqueId());
         if (key == null) {
             send(player, ChatColor.RED + "Join an arena queue before choosing a preference.");
             return;
         }
 
-        ActiveArena activeArena = activeArenas.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return;
         }

@@ -7,7 +7,6 @@ import org.bukkit.potion.PotionEffectType;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -16,14 +15,14 @@ import java.util.function.Consumer;
  */
 final class ArenaLifecycleService {
 
-    private final Map<String, ActiveArena> activeArenas;
+    private final ActiveArenaDirectory arenaDirectory;
     private final ArenaBarrierService barrierService;
     private final Consumer<String> statusNotifier;
 
-    ArenaLifecycleService(Map<String, ActiveArena> activeArenas,
+    ArenaLifecycleService(ActiveArenaDirectory arenaDirectory,
                           ArenaBarrierService barrierService,
                           Consumer<String> statusNotifier) {
-        this.activeArenas = activeArenas;
+        this.arenaDirectory = arenaDirectory;
         this.barrierService = barrierService;
         this.statusNotifier = statusNotifier;
     }
@@ -77,9 +76,7 @@ final class ArenaLifecycleService {
 
         if (activeArena == null) {
             notifyStatus(arenaName);
-            if (key != null) {
-                activeArenas.remove(key);
-            }
+            arenaDirectory.remove(key);
             return;
         }
 
@@ -89,7 +86,7 @@ final class ArenaLifecycleService {
             resetArenaState(activeArena);
             activeArena.clearPlayers();
             activeArena.setRunning(false);
-            activeArenas.remove(key);
+            arenaDirectory.remove(key);
             notifyStatus(arenaName);
             return;
         }

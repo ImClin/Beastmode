@@ -7,7 +7,6 @@ import org.bukkit.entity.Player;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 /**
  * Coordinates arena lifecycle commands and match preparation.
@@ -16,7 +15,7 @@ final class MatchOrchestrationService {
 
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
 
-    private final Map<String, ActiveArena> activeArenas;
+    private final ActiveArenaDirectory arenaDirectory;
     private final ArenaStorage arenaStorage;
     private final ArenaLifecycleService arenaLifecycle;
     private final ArenaWaitingService waitingService;
@@ -25,7 +24,7 @@ final class MatchOrchestrationService {
     private final ArenaStatusService statusService;
     private final String prefix;
 
-    MatchOrchestrationService(Map<String, ActiveArena> activeArenas,
+    MatchOrchestrationService(ActiveArenaDirectory arenaDirectory,
                               ArenaStorage arenaStorage,
                               ArenaLifecycleService arenaLifecycle,
                               ArenaWaitingService waitingService,
@@ -33,7 +32,7 @@ final class MatchOrchestrationService {
                               ArenaDepartureService departureService,
                               ArenaStatusService statusService,
                               String prefix) {
-        this.activeArenas = activeArenas;
+        this.arenaDirectory = arenaDirectory;
         this.arenaStorage = arenaStorage;
         this.arenaLifecycle = arenaLifecycle;
         this.waitingService = waitingService;
@@ -87,7 +86,7 @@ final class MatchOrchestrationService {
 
         String trimmed = arenaName.trim();
         String key = trimmed.toLowerCase(Locale.ENGLISH);
-        ActiveArena activeArena = activeArenas.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             send(player, ChatColor.YELLOW + MSG_ARENA_NOT_RUNNING.formatted(highlight(trimmed)));
             return;
@@ -107,17 +106,17 @@ final class MatchOrchestrationService {
             return false;
         }
         String key = arenaName.trim().toLowerCase(Locale.ENGLISH);
-        return activeArenas.containsKey(key);
+        return arenaDirectory.contains(key);
     }
 
     void shutdown() {
-        for (ActiveArena activeArena : activeArenas.values()) {
+        for (ActiveArena activeArena : arenaDirectory.values()) {
             activeArena.cancelTasks();
             arenaLifecycle.resetArenaState(activeArena);
             activeArena.clearPlayers();
             activeArena.setRunning(false);
         }
-        activeArenas.clear();
+        arenaDirectory.clear();
         departureService.shutdown();
     }
 
@@ -132,7 +131,7 @@ final class MatchOrchestrationService {
         }
 
         String key = arena.getName().toLowerCase(Locale.ENGLISH);
-        ActiveArena activeArena = activeArenas.get(key);
+    ActiveArena activeArena = arenaDirectory.get(key);
 
         int playerCount = 0;
         boolean running = false;
