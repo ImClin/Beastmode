@@ -2,7 +2,6 @@ package com.colin.beastmode.game;
 
 import com.colin.beastmode.Beastmode;
 import com.colin.beastmode.model.ArenaDefinition;
-import com.colin.beastmode.model.Cuboid;
 import com.colin.beastmode.storage.ArenaStorage;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -44,6 +43,7 @@ public class GameManager {
     private final MatchFlowService matchFlow;
     private final MatchSelectionService selectionService;
     private final ArenaDepartureService departureService;
+    private final MatchCompletionService completionService;
     private final ArenaQueueService queueService;
     static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
@@ -85,6 +85,7 @@ public class GameManager {
             this.messaging, this.matchFlow, this.waitingService, this.arenaLifecycle, this::notifyArenaStatus);
         this.departureService = new ArenaDepartureService(this.prefix, this.playerSupport, this.playerTransitions,
             this.waitingService, this.arenaLifecycle, this.matchOutcome, this::notifyArenaStatus);
+        this.completionService = new MatchCompletionService(this.activeArenas, this::findArenaByPlayer, this.departureService);
         this.queueService = new ArenaQueueService(this.arenaStorage, this.activeArenas,
             this.playerSupport, this.roleSelection, this.waitingService, this.prefix);
     }
@@ -130,81 +131,11 @@ public class GameManager {
     }
 
     public void handlePlayerMove(Player player, Location from, Location to) {
-        if (player == null || to == null) {
-            return;
-        }
-
-        if (from != null
-                && from.getBlockX() == to.getBlockX()
-                && from.getBlockY() == to.getBlockY()
-                && from.getBlockZ() == to.getBlockZ()) {
-            return;
-        }
-
-        String key = findArenaByPlayer(player.getUniqueId());
-        if (key == null) {
-            return;
-        }
-
-        ActiveArena activeArena = activeArenas.get(key);
-        if (activeArena == null || !activeArena.isMatchActive()) {
-            return;
-        }
-
-        Location finishButton = activeArena.getArena().getFinishButton();
-        if (finishButton != null) {
-            return;
-        }
-
-        Cuboid finish = activeArena.getArena().getFinishRegion();
-        if (finish == null) {
-            return;
-        }
-
-        if (from != null && finish.contains(from)) {
-            return;
-        }
-
-        if (!finish.contains(to)) {
-            return;
-        }
-
-        if (!activeArena.isRunner(player.getUniqueId())) {
-            return;
-        }
-
-    departureService.handleRunnerVictory(key, activeArena, player);
+        completionService.handlePlayerMove(player, from, to);
     }
 
     public void handlePlayerInteract(Player player, Block block) {
-        if (player == null || block == null) {
-            return;
-        }
-
-        String key = findArenaByPlayer(player.getUniqueId());
-        if (key == null) {
-            return;
-        }
-
-        ActiveArena activeArena = activeArenas.get(key);
-        if (activeArena == null || !activeArena.isMatchActive()) {
-            return;
-        }
-
-        Location finishButton = activeArena.getArena().getFinishButton();
-        if (finishButton == null) {
-            return;
-        }
-
-        if (!isSameBlock(block.getLocation(), finishButton)) {
-            return;
-        }
-
-        if (!activeArena.isRunner(player.getUniqueId())) {
-            return;
-        }
-
-    departureService.handleRunnerVictory(key, activeArena, player);
+        completionService.handlePlayerInteract(player, block);
     }
 
     public void handlePlayerDeath(Player player) {
@@ -516,21 +447,6 @@ public class GameManager {
 
     private void send(Player player, String message) {
         player.sendMessage(prefix + message);
-    }
-
-    private boolean isSameBlock(Location first, Location second) {
-        if (first == null || second == null) {
-            return false;
-        }
-        if (first.getWorld() == null || second.getWorld() == null) {
-            return false;
-        }
-        if (!first.getWorld().equals(second.getWorld())) {
-            return false;
-        }
-        return first.getBlockX() == second.getBlockX()
-                && first.getBlockY() == second.getBlockY()
-                && first.getBlockZ() == second.getBlockZ();
     }
 
 }
