@@ -102,17 +102,11 @@ public class GameManager {
             return;
         }
 
-        UUID uuid = player.getUniqueId();
-        String key = findArenaByPlayer(uuid);
-        if (key == null) {
+        ActiveArenaContext context = resolveActiveArena(player.getUniqueId());
+        if (context == null) {
             return;
         }
-
-        ActiveArena activeArena = arenaDirectory.get(key);
-        if (activeArena == null) {
-            return;
-        }
-        departureService.handlePlayerQuit(key, activeArena, player);
+        departureService.handlePlayerQuit(context.key(), context.arena(), player);
     }
 
     public void handlePlayerJoin(Player player) {
@@ -128,17 +122,11 @@ public class GameManager {
             return false;
         }
 
-        UUID uuid = player.getUniqueId();
-        String key = findArenaByPlayer(uuid);
-        if (key == null) {
+        ActiveArenaContext context = resolveActiveArena(player.getUniqueId());
+        if (context == null) {
             return false;
         }
-
-        ActiveArena activeArena = arenaDirectory.get(key);
-        if (activeArena == null) {
-            return false;
-        }
-        return departureService.handleSpawnCommand(key, activeArena, player);
+        return departureService.handleSpawnCommand(context.key(), context.arena(), player);
     }
 
     public boolean shouldCancelDamage(Player player) {
@@ -146,17 +134,12 @@ public class GameManager {
             return false;
         }
 
-        String key = findArenaByPlayer(player.getUniqueId());
-        if (key == null) {
+        ActiveArenaContext context = resolveActiveArena(player.getUniqueId());
+        if (context == null) {
             return false;
         }
 
-        ActiveArena activeArena = arenaDirectory.get(key);
-        if (activeArena == null) {
-            return false;
-        }
-
-        return activeArena.isDamageProtectionActive();
+        return context.arena().isDamageProtectionActive();
     }
 
     public void cancelArena(Player player, String arenaName) {
@@ -173,6 +156,24 @@ public class GameManager {
 
     String findArenaByPlayer(UUID uuid) {
         return arenaDirectory.findArenaByPlayer(uuid);
+    }
+
+    private ActiveArenaContext resolveActiveArena(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
+
+        String key = findArenaByPlayer(uuid);
+        if (key == null) {
+            return null;
+        }
+
+        ActiveArena activeArena = arenaDirectory.get(key);
+        if (activeArena == null) {
+            return null;
+        }
+
+        return new ActiveArenaContext(key, activeArena);
     }
 
     public boolean isPlayerInArena(UUID uuid) {
@@ -225,4 +226,6 @@ public class GameManager {
         preferenceService.handlePreferenceItemUse(player, stack);
     }
 
+    private record ActiveArenaContext(String key, ActiveArena arena) {
+    }
 }
