@@ -53,16 +53,16 @@ public class GameManager {
             preferenceKey, exitTokenTemplate, LONG_EFFECT_DURATION_TICKS, DEFAULT_BEAST_NAME,
             PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
 
-        this.arenaDirectory = services.arenaDirectory;
-        this.statusService = services.statusService;
-        this.playerSupport = services.playerSupport;
-        this.roleSelection = services.roleSelection;
-        this.preferenceService = services.preferenceService;
-        this.departureService = services.departureService;
-        this.completionService = services.completionService;
-        this.eliminationService = services.eliminationService;
-        this.orchestration = services.orchestration;
-        this.queueService = services.queueService;
+    this.arenaDirectory = services.arenaDirectory();
+    this.statusService = services.statusService();
+    this.playerSupport = services.playerSupport();
+    this.roleSelection = services.roleSelection();
+    this.preferenceService = services.preferenceService();
+    this.departureService = services.departureService();
+    this.completionService = services.completionService();
+    this.eliminationService = services.eliminationService();
+    this.orchestration = services.orchestration();
+    this.queueService = services.queueService();
     }
 
     public void registerStatusListener(Consumer<String> listener) {
