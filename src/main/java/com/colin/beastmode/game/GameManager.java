@@ -42,6 +42,7 @@ public class GameManager {
     private final MatchOutcomeService matchOutcome;
     private final MatchFlowService matchFlow;
     private final MatchSelectionService selectionService;
+    private final PlayerPreferenceService preferenceService;
     private final ArenaDepartureService departureService;
     private final MatchCompletionService completionService;
     private final MatchEliminationService eliminationService;
@@ -84,6 +85,8 @@ public class GameManager {
             messaging, prefix, LONG_EFFECT_DURATION_TICKS);
         this.selectionService = new MatchSelectionService(this.countdowns, this.roleSelection, this.matchSetup,
             this.messaging, this.matchFlow, this.waitingService, this.arenaLifecycle, this::notifyArenaStatus);
+        this.preferenceService = new PlayerPreferenceService(this.activeArenas, this::findArenaByPlayer,
+            this.playerSupport, this.roleSelection, this.prefix);
         this.departureService = new ArenaDepartureService(this.prefix, this.playerSupport, this.playerTransitions,
             this.waitingService, this.arenaLifecycle, this.matchOutcome, this::notifyArenaStatus);
         this.completionService = new MatchCompletionService(this.activeArenas, this::findArenaByPlayer, this.departureService);
@@ -360,46 +363,7 @@ public class GameManager {
     }
 
     public void handlePreferenceItemUse(Player player, ItemStack stack) {
-        RolePreference desired = playerSupport.readPreferenceType(stack);
-        if (player == null || desired == null) {
-            return;
-        }
-        if (!canChoosePreference(player)) {
-            send(player, ChatColor.RED + "You do not have permission to choose a role preference.");
-            return;
-        }
-
-        String key = findArenaByPlayer(player.getUniqueId());
-        if (key == null) {
-            send(player, ChatColor.RED + "Join an arena queue before choosing a preference.");
-            return;
-        }
-
-        ActiveArena activeArena = activeArenas.get(key);
-        if (activeArena == null) {
-            return;
-        }
-
-        RolePreference current = activeArena.getPreference(player.getUniqueId());
-        RolePreference next;
-        if (current == desired) {
-            next = RolePreference.ANY;
-            send(player, ChatColor.YELLOW + "Preference cleared. Odds returned to " + formatPreference(next) + ChatColor.YELLOW + ".");
-        } else {
-            next = desired;
-            send(player, ChatColor.GOLD + "Preference set to " + formatPreference(next) + ChatColor.GOLD + ".");
-        }
-
-        activeArena.setPreference(player.getUniqueId(), next);
-        playerSupport.givePreferenceSelectors(player, next);
-    }
-
-    private String formatPreference(RolePreference preference) {
-        return switch (preference) {
-            case RUNNER -> ChatColor.AQUA + "runner" + ChatColor.RESET;
-            case BEAST -> ChatColor.DARK_RED + "beast" + ChatColor.RESET;
-            default -> ChatColor.GRAY + "any" + ChatColor.RESET;
-        };
+        preferenceService.handlePreferenceItemUse(player, stack);
     }
 
     private String highlightArena(String arenaName) {
