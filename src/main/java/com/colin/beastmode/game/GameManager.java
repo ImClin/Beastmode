@@ -13,18 +13,13 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -32,8 +27,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 public class GameManager {
@@ -49,6 +42,11 @@ public class GameManager {
     private final List<Consumer<String>> statusListeners = new CopyOnWriteArrayList<>();
     private final PlayerSupportService playerSupport;
     private final ArenaBarrierService barrierService;
+    private final CountdownService countdowns;
+    private final RoleSelectionService roleSelection;
+    private final MatchSetupService matchSetup;
+    private final ArenaMessagingService messaging;
+    private final MatchFlowService matchFlow;
     private static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     private static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
     private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
@@ -72,10 +70,16 @@ public class GameManager {
         this.prefix = plugin.getConfig().getString("messages.prefix", "[Beastmode] ");
         this.exitTokenKey = new NamespacedKey(plugin, "exit_token");
         this.preferenceKey = new NamespacedKey(plugin, "preference_selector");
-        this.exitTokenTemplate = createExitToken();
+    this.exitTokenTemplate = createExitToken();
     this.playerSupport = new PlayerSupportService(plugin, prefix, LONG_EFFECT_DURATION_TICKS,
         exitTokenKey, preferenceKey, exitTokenTemplate);
     this.barrierService = new ArenaBarrierService();
+    this.countdowns = new CountdownService(plugin);
+    this.roleSelection = new RoleSelectionService(PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
+    this.matchSetup = new MatchSetupService(this.playerSupport, prefix);
+    this.messaging = new ArenaMessagingService(prefix, DEFAULT_BEAST_NAME);
+    this.matchFlow = new MatchFlowService(plugin, countdowns, barrierService, playerSupport,
+        messaging, prefix, LONG_EFFECT_DURATION_TICKS);
     }
 
     public void registerStatusListener(Consumer<String> listener) {
@@ -802,7 +806,7 @@ public class GameManager {
     }
 
     public boolean canChoosePreference(Player player) {
-        return determineTier(player) != PlayerTier.NORMAL;
+        return roleSelection.canChoosePreference(player);
     }
 
     public ArenaStatus getArenaStatus(String arenaName) {
@@ -904,8 +908,8 @@ public class GameManager {
         }
 
         participant.teleport(target.clone());
-    participant.setGameMode(GameMode.ADVENTURE);
-    playerSupport.restoreVitals(participant);
+        participant.setGameMode(GameMode.ADVENTURE);
+        playerSupport.restoreVitals(participant);
         participant.sendTitle(ChatColor.GOLD + "Preparing...", "", 10, 40, 10);
         return true;
     }
@@ -932,8 +936,33 @@ public class GameManager {
 
         activeArena.setSelecting(true);
         notifyArenaStatus(activeArena);
-        SelectionCountdown countdown = new SelectionCountdown(key, activeArena, 10, 5);
-        countdown.start();
+        countdowns.startSelectionCountdown(activeArena, 10, 5,
+                () -> collectParticipants(activeArena),
+                () -> getRequiredParticipants(activeArena.getArena()),
+                players -> {
+                    activeArena.setSelecting(false);
+                    notifyArenaStatus(activeArena);
+                    notifyWaitingForPlayers(activeArena, players);
+                },
+                messaging::selectionCountdown,
+                () -> startWheelSelection(key, activeArena, 5),
+                () -> cleanupArena(key, activeArena));
+    }
+
+    private void startWheelSelection(String key, ActiveArena activeArena, int durationSeconds) {
+        countdowns.startWheelSelection(activeArena, durationSeconds,
+                () -> collectParticipants(activeArena),
+                () -> getRequiredParticipants(activeArena.getArena()),
+                players -> {
+                    activeArena.setSelecting(false);
+                    notifyArenaStatus(activeArena);
+                    notifyWaitingForPlayers(activeArena, players);
+                },
+                participants -> roleSelection.selectBeast(activeArena, participants, null),
+                messaging::wheelHighlight,
+                messaging::wheelFinal,
+                (participants, chosen) -> finalizeSelection(key, activeArena, participants, chosen),
+                () -> cleanupArena(key, activeArena));
     }
 
     private void notifyWaitingForPlayers(ActiveArena activeArena, List<Player> participants) {
@@ -956,612 +985,30 @@ public class GameManager {
         }
     }
 
-    private void scheduleTeleportCountdownStart(String key, ActiveArena activeArena, ArenaDefinition arena,
-                                                Player beast) {
-        final long delayTicks = 60L;
-        final BukkitTask[] holder = new BukkitTask[1];
-        holder[0] = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            activeArena.unregisterTask(holder[0]);
-            beginTeleportCountdown(key, activeArena, arena, beast);
-        }, delayTicks);
-        activeArena.registerTask(holder[0]);
-    }
-
-    private void beginTeleportCountdown(String key, ActiveArena activeArena, ArenaDefinition arena,
-                                        Player beast) {
-        TeleportCountdown countdown = new TeleportCountdown(key, activeArena, arena, beast, 1);
-        countdown.start();
-    }
-
-    private class SelectionCountdown extends BukkitRunnable {
-        private final String key;
-        private final ActiveArena activeArena;
-        private final int wheelSeconds;
-        private int remaining;
-        private BukkitTask handle;
-
-        private SelectionCountdown(String key, ActiveArena activeArena, int totalSeconds, int wheelSeconds) {
-            this.key = key;
-            this.activeArena = activeArena;
-            this.wheelSeconds = wheelSeconds;
-            this.remaining = totalSeconds;
-        }
-
-        private void start() {
-            announceCountdown(remaining);
-            handle = runTaskTimer(plugin, 20L, 20L);
-            activeArena.registerTask(handle);
-        }
-
-        @Override
-        public void run() {
-            List<Player> current = collectParticipants(activeArena);
-            if (current.size() < getRequiredParticipants(activeArena.getArena())) {
-                cancel();
-                activeArena.setSelecting(false);
-                notifyArenaStatus(activeArena);
-                notifyWaitingForPlayers(activeArena, current);
-                return;
-            }
-
-            remaining--;
-            if (remaining > wheelSeconds) {
-                announceCountdown(remaining);
-                return;
-            }
-
-            cancel();
-            WheelSelection wheel = new WheelSelection(key, activeArena, wheelSeconds);
-            wheel.start();
-        }
-
-        private void announceCountdown(int seconds) {
-            List<Player> players = collectParticipants(activeArena);
-            for (Player player : players) {
-                player.sendTitle(ChatColor.GOLD + "" + ChatColor.BOLD + seconds,
-                        ChatColor.AQUA + "seconds until game starts", 0, 20, 0);
-                player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 1.0f, 1.0f);
-            }
-        }
-
-        @Override
-        public synchronized void cancel() throws IllegalStateException {
-            super.cancel();
-            if (handle != null) {
-                activeArena.unregisterTask(handle);
-            }
-        }
-    }
-
-    private class WheelSelection extends BukkitRunnable {
-        private final String key;
-        private final ActiveArena activeArena;
-        private static final int PERIOD_TICKS = 4;
-        private int ticksRemaining;
-        private int index;
-        private boolean finalized;
-        private BukkitTask handle;
-
-        private WheelSelection(String key, ActiveArena activeArena, int durationSeconds) {
-            this.key = key;
-            this.activeArena = activeArena;
-            this.ticksRemaining = durationSeconds * 20;
-            this.index = ThreadLocalRandom.current().nextInt(Math.max(activeArena.getPlayerIds().size(), 1));
-        }
-
-        private void start() {
-            handle = runTaskTimer(plugin, 0L, PERIOD_TICKS);
-            activeArena.registerTask(handle);
-        }
-
-        @Override
-        public void run() {
-            List<Player> current = collectParticipants(activeArena);
-            if (current.size() < getRequiredParticipants(activeArena.getArena())) {
-                cancel();
-                activeArena.setSelecting(false);
-                notifyArenaStatus(activeArena);
-                notifyWaitingForPlayers(activeArena, current);
-                return;
-            }
-
-            if (ticksRemaining <= 20 && !finalized) {
-                Player chosen = resolveBeast(activeArena, current, null);
-                showFinalSelection(current, chosen);
-                finalizeSelection(key, activeArena, current, chosen);
-                finalized = true;
-                cancel();
-                return;
-            }
-
-            Player highlighted = selectCurrentPlayer(current);
-            showWheelHighlight(current, highlighted);
-            index++;
-            ticksRemaining -= PERIOD_TICKS;
-        }
-
-        private Player selectCurrentPlayer(List<Player> players) {
-            if (players.isEmpty()) {
-                return null;
-            }
-            return players.get(index % players.size());
-        }
-
-        private void showWheelHighlight(List<Player> viewers, Player highlighted) {
-            if (highlighted == null) {
-                return;
-            }
-            String title = ChatColor.AQUA + "" + ChatColor.BOLD + highlighted.getName();
-            String subtitle = ChatColor.LIGHT_PURPLE + "" + ChatColor.BOLD + "Wheel of Fate";
-            for (Player viewer : viewers) {
-                viewer.sendTitle(title, subtitle, 0, 10, 0);
-                viewer.playSound(viewer.getLocation(), Sound.UI_BUTTON_CLICK, 1.0f, 1.3f);
-            }
-        }
-
-        private void showFinalSelection(List<Player> viewers, Player chosen) {
-            if (chosen == null) {
-                return;
-            }
-            String title = ChatColor.DARK_RED + "" + ChatColor.BOLD + chosen.getName();
-            String subtitle = ChatColor.GOLD + "" + ChatColor.BOLD + "is the Beast!";
-            for (Player viewer : viewers) {
-                viewer.sendTitle(title, subtitle, 10, 80, 20);
-                viewer.playSound(viewer.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1.0f, 1.0f);
-            }
-        }
-
-        @Override
-        public synchronized void cancel() throws IllegalStateException {
-            super.cancel();
-            if (handle != null) {
-                activeArena.unregisterTask(handle);
-            }
-        }
-    }
-
-    private class TeleportCountdown extends BukkitRunnable {
-        private final String key;
-        private final ActiveArena activeArena;
-        private final ArenaDefinition arena;
-        private final Player beast;
-        private int remaining;
-        private BukkitTask handle;
-
-        private TeleportCountdown(String key, ActiveArena activeArena, ArenaDefinition arena,
-                                  Player beast, int seconds) {
-            this.key = key;
-            this.activeArena = activeArena;
-            this.arena = arena;
-            this.beast = beast;
-            this.remaining = Math.max(seconds, 0);
-        }
-
-        private void start() {
-            handle = runTaskTimer(plugin, 0L, 20L);
-            activeArena.setMatchActive(true);
-            activeArena.registerTask(handle);
-            notifyArenaStatus(activeArena);
-        }
-
-        @Override
-        public void run() {
-            List<Player> current = collectParticipants(activeArena);
-            if (current.isEmpty()) {
-                cancel();
-                cleanupArena(key, activeArena);
-                return;
-            }
-
-            if (remaining > 0) {
-                displayTeleportCountdown(current, remaining);
-                remaining--;
-                return;
-            }
-
-            displayTeleportCountdown(current, 0);
-            cancel();
-            teleportParticipants(arena, current, beast);
-            scheduleWallOpenings(key, activeArena, arena, beast, current);
-        }
-
-        private void displayTeleportCountdown(List<Player> players, int number) {
-            String title;
-            String subtitle;
-            Sound sound;
-            float pitch;
-
-            if (number > 0) {
-                title = ChatColor.GOLD + "" + ChatColor.BOLD + number;
-                subtitle = ChatColor.DARK_AQUA + "" + ChatColor.BOLD + "Teleporting soon...";
-                sound = Sound.BLOCK_NOTE_BLOCK_HAT;
-                pitch = 1.0f + (3 - Math.min(number, 3)) * 0.1f;
-            } else {
-                title = ChatColor.GREEN + "" + ChatColor.BOLD + "0";
-                subtitle = ChatColor.AQUA + "" + ChatColor.BOLD + "Brace yourself!";
-                sound = Sound.ENTITY_PLAYER_LEVELUP;
-                pitch = 1.0f;
-            }
-
-            for (Player player : players) {
-                player.sendTitle(title, subtitle, 0, 20, 0);
-                player.playSound(player.getLocation(), sound, 1.0f, pitch);
-            }
-        }
-
-        @Override
-        public synchronized void cancel() throws IllegalStateException {
-            super.cancel();
-            if (handle != null) {
-                activeArena.unregisterTask(handle);
-            }
-        }
-    }
-
     private void finalizeSelection(String key, ActiveArena activeArena, List<Player> participants, Player selectedBeast) {
-        List<Player> current = resolveParticipants(activeArena, participants);
+        List<Player> current = matchSetup.resolveParticipants(activeArena, participants);
         if (current.isEmpty()) {
             cleanupArena(key, activeArena);
             return;
         }
 
         ArenaDefinition arena = activeArena.getArena();
-        if (!validateSpawns(current, arena)) {
+        if (!matchSetup.validateSpawns(current, arena)) {
             cleanupArena(key, activeArena);
             return;
         }
 
-        Player beast = resolveBeast(activeArena, current, selectedBeast);
-        activeArena.setSelecting(false);
-    notifyArenaStatus(activeArena);
-        activeArena.setBeastId(beast != null ? beast.getUniqueId() : null);
-        Set<UUID> runnerIds = new HashSet<>();
-        for (Player player : current) {
-            if (beast != null && player.equals(beast)) {
-                continue;
-            }
-            runnerIds.add(player.getUniqueId());
-        }
-        activeArena.setRunners(runnerIds);
-    playerSupport.removeExitTokens(current);
-    announceBeast(current, beast);
-    scheduleTeleportCountdownStart(key, activeArena, arena, beast);
-    }
-
-    private List<Player> resolveParticipants(ActiveArena activeArena, List<Player> participants) {
-        if (participants != null && !participants.isEmpty()) {
-            return new ArrayList<>(participants);
-        }
-        return collectParticipants(activeArena);
-    }
-
-    private boolean validateSpawns(List<Player> players, ArenaDefinition arena) {
-        if (arena.getRunnerSpawn() != null && arena.getBeastSpawn() != null) {
-            return true;
-        }
-        for (Player player : players) {
-            send(player, ChatColor.RED + "Arena spawns are not configured.");
-        }
-        return false;
-    }
-
-    private Player resolveBeast(ActiveArena activeArena, List<Player> players, Player candidate) {
-        if (candidate != null && players.contains(candidate)) {
-            RolePreference preference = activeArena.getPreference(candidate.getUniqueId());
-            if (preference != RolePreference.RUNNER) {
-                return candidate;
-            }
-        }
-
-        Map<Player, Double> weights = new LinkedHashMap<>();
-        double total = 0.0;
-
-        for (Player player : players) {
-            RolePreference pref = activeArena.getPreference(player.getUniqueId());
-            double weight = calculateBeastWeight(player, pref);
-            if (weight <= 0.0d) {
-                continue;
-            }
-            weights.put(player, weight);
-            total += weight;
-        }
-
-        if (total <= 0.0d) {
-            for (Player player : players) {
-                double weight = fallbackBeastWeight(player);
-                if (weight <= 0.0d) {
-                    continue;
-                }
-                weights.put(player, weight);
-                total += weight;
-            }
-        }
-
-        if (total <= 0.0d) {
-            if (players.size() == 1) {
-                return null; // practice run
-            }
-            return players.get(ThreadLocalRandom.current().nextInt(players.size()));
-        }
-
-        double pick = ThreadLocalRandom.current().nextDouble(total);
-        for (Map.Entry<Player, Double> entry : weights.entrySet()) {
-            pick -= entry.getValue();
-            if (pick <= 0.0d) {
-                return entry.getKey();
-            }
-        }
-
-        return weights.keySet().stream().reduce((first, second) -> second).orElseGet(() -> players.get(0));
-    }
-
-    private void announceBeast(List<Player> players, Player beast) {
-        if (beast == null) {
-            for (Player viewer : players) {
-                String title = ChatColor.GREEN + "" + ChatColor.BOLD + "Practice Run";
-                String subtitle = ChatColor.YELLOW + "" + ChatColor.BOLD + "No Beast this round.";
-                viewer.sendTitle(title, subtitle, 10, 60, 20);
-                viewer.sendMessage(prefix + ChatColor.YELLOW + "" + ChatColor.BOLD + "Practice run!" + ChatColor.RESET + ChatColor.YELLOW + " No Beast this time.");
-                viewer.playSound(viewer.getLocation(), Sound.UI_BUTTON_CLICK, 1.0f, 1.2f);
-            }
-            return;
-        }
-
-    for (Player viewer : players) {
-        boolean isBeast = viewer.equals(beast);
-        String title = isBeast
-            ? ChatColor.DARK_RED + "" + ChatColor.BOLD + "You are the Beast!"
-            : ChatColor.DARK_RED + "" + ChatColor.BOLD + beast.getName();
-        String subtitle = isBeast
-            ? ChatColor.GOLD + "" + ChatColor.BOLD + "Track them down!"
-            : ChatColor.GOLD + "" + ChatColor.BOLD + "is the Beast!";
-        int stay = isBeast ? 100 : 60;
-        viewer.sendTitle(title, subtitle, 10, stay, 20);
-        viewer.sendMessage(prefix + ChatColor.GOLD + "" + ChatColor.BOLD + beast.getName() + ChatColor.RED + "" + ChatColor.BOLD + " is the Beast!");
-        viewer.playSound(viewer.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1.0f, 0.7f);
-    }
-    }
-
-    private void scheduleWallOpenings(String key, ActiveArena activeArena, ArenaDefinition arena, Player beast, List<Player> participants) {
-        int runnerDelay = Math.max(arena.getRunnerWallDelaySeconds(), 0);
-        int beastDelay = Math.max(arena.getBeastReleaseDelaySeconds(), 0);
-
-        Runnable runnerOpenAction = () -> {
-            List<Player> current = collectParticipants(activeArena);
-            if (current.isEmpty()) {
-                cleanupArena(key, activeArena);
-                return;
-            }
-            broadcastGo(current);
-            openRunnerGate(activeArena, arena);
-            if (beast == null) {
-                sendPracticeReminder(current);
-                cleanupArena(key, activeArena, false);
-            } else {
-                scheduleBeastRelease(key, activeArena, arena, beastDelay, beast, current);
-            }
-        };
-
-        if (runnerDelay <= 0) {
-            runnerOpenAction.run();
-            return;
-        }
-
-    sendToPlayers(participants, ChatColor.AQUA + "" + ChatColor.BOLD + "Runner gate opens in "
-        + ChatColor.WHITE + formatSeconds(runnerDelay) + ChatColor.AQUA + "." + ChatColor.RESET);
-        broadcastReady(participants);
-        startCountdown(key, activeArena, runnerDelay,
-                    this::announceRunnerCountdown,
-                runnerOpenAction);
-    }
-
-    private void scheduleBeastRelease(String key, ActiveArena activeArena, ArenaDefinition arena, int beastDelay,
-                                      Player beast, List<Player> participantsAtRelease) {
-        if (beast == null) {
-            return;
-        }
-
-        Runnable beastOpenAction = () -> {
-            List<Player> current = collectParticipants(activeArena);
-            if (current.isEmpty()) {
-                cleanupArena(key, activeArena);
-                return;
-            }
-            broadcastBeastRelease(current, beast);
-            openBeastGate(activeArena, arena, beast);
-        };
-
-        if (beastDelay <= 0) {
-            applyBeastReleaseEffects(activeArena, beast);
-            beastOpenAction.run();
-            return;
-        }
-
-    sendToPlayers(participantsAtRelease, ChatColor.DARK_RED + "" + ChatColor.BOLD + "Beast gate opens in "
-        + ChatColor.WHITE + formatSeconds(beastDelay) + ChatColor.DARK_RED + "." + ChatColor.RESET);
-
-        startCountdown(key, activeArena, beastDelay,
-                (players, seconds) -> {
-                    announceBeastCountdown(players, seconds, beast);
-                    if (seconds == 1) {
-                        applyBeastReleaseEffects(activeArena, beast);
-                    }
-                },
-                beastOpenAction);
-    }
-
-    private void applyBeastReleaseEffects(ActiveArena activeArena, Player beast) {
-        if (beast == null || !beast.isOnline()) {
-            return;
-        }
-        int speedLevel = 1;
-        if (activeArena != null && activeArena.getArena() != null) {
-            speedLevel = Math.max(activeArena.getArena().getBeastSpeedLevel(), 0);
-        }
-        beast.removePotionEffect(PotionEffectType.SPEED);
-        if (speedLevel > 0) {
-            PotionEffect speed = new PotionEffect(PotionEffectType.SPEED, LONG_EFFECT_DURATION_TICKS, Math.max(speedLevel - 1, 0), false, false, true);
-            beast.addPotionEffect(speed);
-        }
-    playerSupport.applyFireResistance(beast);
-        if (activeArena != null) {
-            activeArena.setBeastId(beast.getUniqueId());
-        }
-    }
-
-    private void openRunnerGate(ActiveArena activeArena, ArenaDefinition arena) {
-        if (!activeArena.isRunnerWallOpened()) {
-            if (arena.getRunnerWall() != null) {
-                if (activeArena.getRunnerWallSnapshot() == null) {
-                    activeArena.setRunnerWallSnapshot(barrierService.capture(arena.getRunnerWall()));
-                }
-                barrierService.clear(arena.getRunnerWall());
-            }
-            activeArena.setRunnerWallOpened(true);
-            activeArena.releaseDamageProtectionAfter(1000L);
-        }
-    }
-
-    private void openBeastGate(ActiveArena activeArena, ArenaDefinition arena, Player beast) {
-        if (!activeArena.isBeastWallOpened()) {
-            if (arena.getBeastWall() != null) {
-                if (activeArena.getBeastWallSnapshot() == null) {
-                    activeArena.setBeastWallSnapshot(barrierService.capture(arena.getBeastWall()));
-                }
-                barrierService.clear(arena.getBeastWall());
-            }
-            activeArena.setBeastWallOpened(true);
-        }
-        if (beast != null && beast.isOnline()) {
-            send(beast, ChatColor.DARK_RED + "You are free! Hunt them down!");
-        }
-    }
-
-    private void startCountdown(String key, ActiveArena activeArena, int seconds,
-                                BiConsumer<List<Player>, Integer> announcer, Runnable completion) {
-        if (seconds <= 0) {
-            completion.run();
-            return;
-        }
-
-        CountdownRunnable runnable = new CountdownRunnable(key, activeArena, seconds, announcer, completion);
-        runnable.start();
-    }
-
-    private class CountdownRunnable extends BukkitRunnable {
-        private final String key;
-        private final ActiveArena activeArena;
-        private int remaining;
-        private final BiConsumer<List<Player>, Integer> announcer;
-        private final Runnable completion;
-        private BukkitTask handle;
-
-        private CountdownRunnable(String key, ActiveArena activeArena, int seconds,
-                                  BiConsumer<List<Player>, Integer> announcer, Runnable completion) {
-            this.key = key;
-            this.activeArena = activeArena;
-            this.remaining = seconds;
-            this.announcer = announcer;
-            this.completion = completion;
-        }
-
-        private void start() {
-            handle = runTaskTimer(plugin, 0L, 20L);
-            activeArena.registerTask(handle);
-        }
-
-        @Override
-        public void run() {
-            List<Player> current = collectParticipants(activeArena);
-            if (current.isEmpty()) {
-                cancel();
-                cleanupArena(key, activeArena);
-                return;
-            }
-
-            if (remaining <= 0) {
-                cancel();
-                completion.run();
-                return;
-            }
-
-            announcer.accept(current, remaining);
-            remaining--;
-        }
-
-        @Override
-        public synchronized void cancel() throws IllegalStateException {
-            super.cancel();
-            if (handle != null) {
-                activeArena.unregisterTask(handle);
-            }
-        }
-    }
-
-    private void announceRunnerCountdown(List<Player> players, int seconds) {
-        if (seconds > 3) {
-            return;
-        }
-        for (Player player : players) {
-            String title = ChatColor.GOLD + "" + ChatColor.BOLD + seconds + "...";
-            String subtitle = ChatColor.DARK_AQUA + "" + ChatColor.BOLD + "Get ready!";
-            player.sendTitle(title, subtitle, 0, 20, 0);
-            player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1.0f, 1.0f);
-        }
-    }
-
-    private void announceBeastCountdown(List<Player> players, int seconds, Player beast) {
-        if (seconds > 3) {
-            return;
-        }
-    String name = beast != null ? beast.getName() : DEFAULT_BEAST_NAME;
-        for (Player player : players) {
-            String title = ChatColor.DARK_RED + "" + ChatColor.BOLD + seconds + "...";
-            String subtitle = ChatColor.GOLD + "" + ChatColor.BOLD + name;
-            player.sendTitle(title, subtitle, 0, 20, 0);
-            player.playSound(player.getLocation(), Sound.UI_BUTTON_CLICK, 1.0f, 0.8f);
-        }
-    }
-
-    private void broadcastReady(List<Player> players) {
-        for (Player player : players) {
-            String title = ChatColor.LIGHT_PURPLE + "" + ChatColor.BOLD + "READY?";
-            String subtitle = ChatColor.GRAY + "" + ChatColor.BOLD + "Hold the line.";
-            player.sendTitle(title, subtitle, 0, 30, 0);
-            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_HAT, 1.0f, 1.0f);
-        }
-    }
-
-    private void broadcastGo(List<Player> players) {
-        for (Player player : players) {
-            String title = ChatColor.GREEN + "" + ChatColor.BOLD + "GO!";
-            String subtitle = ChatColor.WHITE + "" + ChatColor.BOLD + "Run for your life!";
-            player.sendTitle(title, subtitle, 0, 20, 5);
-            player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
-        }
-    }
-
-    private void broadcastBeastRelease(List<Player> players, Player beast) {
-    String name = beast != null ? beast.getName() : DEFAULT_BEAST_NAME;
-        for (Player player : players) {
-            String title = ChatColor.DARK_RED + "" + ChatColor.BOLD + name;
-            String subtitle = ChatColor.GOLD + "" + ChatColor.BOLD + "is los!";
-            player.sendTitle(title, subtitle, 0, 40, 10);
-            player.playSound(player.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1.0f, 1.0f);
-        }
-    }
-
-    private void sendPracticeReminder(List<Player> players) {
-        for (Player player : players) {
-            send(player, ChatColor.YELLOW + "" + ChatColor.BOLD + "Practice run active!" + ChatColor.RESET
-                    + ChatColor.YELLOW + " Use /beastmode cancel <arena> when you are ready to reset the gates.");
-        }
-    }
-
-    private void sendToPlayers(List<Player> players, String message) {
-        for (Player player : players) {
-            send(player, message);
-        }
+        Player beast = roleSelection.selectBeast(activeArena, current, selectedBeast);
+        matchSetup.assignRoles(activeArena, current, beast);
+        notifyArenaStatus(activeArena);
+        messaging.announceBeast(current, beast);
+        matchFlow.scheduleMatchStart(activeArena, arena, beast,
+                () -> collectParticipants(activeArena),
+                restoreWalls -> cleanupArena(key, activeArena, restoreWalls),
+                () -> {
+                    activeArena.setMatchActive(true);
+                    notifyArenaStatus(activeArena);
+                });
     }
 
     private int getQueueLimit(ArenaDefinition arena) {
@@ -1573,73 +1020,6 @@ public class GameManager {
             return Integer.MAX_VALUE;
         }
         return Math.max(maxRunners + 1, 1);
-    }
-
-    private int getRequiredParticipants(ArenaDefinition arena) {
-        if (arena == null) {
-            return 2;
-        }
-        int minRunners = Math.max(arena.getMinRunners(), 1);
-        return Math.max(minRunners + 1, 2);
-    }
-
-    private int getMissingParticipantsCount(int participantCount, ArenaDefinition arena) {
-        int required = getRequiredParticipants(arena);
-        return Math.max(0, required - participantCount);
-    }
-
-    private String formatPlayerCount(int count) {
-        return count + " more player" + (count == 1 ? "" : "s");
-    }
-
-    private String formatRunnerCount(int count) {
-        return count + " runner" + (count == 1 ? "" : "s");
-    }
-
-    private String formatSeconds(int seconds) {
-        if (seconds <= 0) {
-            return "0 seconds";
-        }
-        return seconds + " " + (seconds == 1 ? "second" : "seconds");
-    }
-
-    private String formatPreference(RolePreference preference) {
-        return switch (preference) {
-            case RUNNER -> ChatColor.AQUA + "runner" + ChatColor.RESET;
-            case BEAST -> ChatColor.DARK_RED + "beast" + ChatColor.RESET;
-            default -> ChatColor.GRAY + "any" + ChatColor.RESET;
-        };
-    }
-
-    private String highlightArena(String arenaName) {
-        return ChatColor.AQUA + arenaName + ChatColor.RESET;
-    }
-
-    private void teleportParticipants(ArenaDefinition arena, List<Player> players, Player beast) {
-        Location beastLocation = arena.getBeastSpawn().clone();
-        Location runnerLocation = arena.getRunnerSpawn().clone();
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            if (beast != null && beast.isOnline()) {
-                playerSupport.clearPreferenceSelectors(beast);
-                beast.teleport(beastLocation);
-                beast.setGameMode(GameMode.ADVENTURE);
-                playerSupport.restoreVitals(beast);
-            }
-            for (Player runner : players) {
-                if (beast != null && runner.equals(beast)) {
-                    continue;
-                }
-                if (runner.isOnline()) {
-                    playerSupport.clearPreferenceSelectors(runner);
-                    runner.teleport(runnerLocation);
-                    runner.setGameMode(GameMode.ADVENTURE);
-                    playerSupport.restoreVitals(runner);
-                }
-            }
-            if (playerSupport.applyBeastLoadout(beast)) {
-                send(beast, ChatColor.DARK_RED + "" + ChatColor.BOLD + "You gear up in unbreakable armor.");
-            }
-        });
     }
 
     private ItemStack createExitToken() {
@@ -1677,7 +1057,7 @@ public class GameManager {
     }
 
     public void handlePreferenceItemUse(Player player, ItemStack stack) {
-    RolePreference desired = playerSupport.readPreferenceType(stack);
+        RolePreference desired = playerSupport.readPreferenceType(stack);
         if (player == null || desired == null) {
             return;
         }
@@ -1708,7 +1088,40 @@ public class GameManager {
         }
 
         activeArena.setPreference(player.getUniqueId(), next);
-    playerSupport.givePreferenceSelectors(player, next);
+        playerSupport.givePreferenceSelectors(player, next);
+    }
+
+    private int getRequiredParticipants(ArenaDefinition arena) {
+        if (arena == null) {
+            return 2;
+        }
+        int minRunners = Math.max(arena.getMinRunners(), 1);
+        return Math.max(minRunners + 1, 2);
+    }
+
+    private int getMissingParticipantsCount(int participantCount, ArenaDefinition arena) {
+        int required = getRequiredParticipants(arena);
+        return Math.max(0, required - participantCount);
+    }
+
+    private String formatPlayerCount(int count) {
+        return count + " more player" + (count == 1 ? "" : "s");
+    }
+
+    private String formatRunnerCount(int count) {
+        return count + " runner" + (count == 1 ? "" : "s");
+    }
+
+    private String formatPreference(RolePreference preference) {
+        return switch (preference) {
+            case RUNNER -> ChatColor.AQUA + "runner" + ChatColor.RESET;
+            case BEAST -> ChatColor.DARK_RED + "beast" + ChatColor.RESET;
+            default -> ChatColor.GRAY + "any" + ChatColor.RESET;
+        };
+    }
+
+    private String highlightArena(String arenaName) {
+        return ChatColor.AQUA + arenaName + ChatColor.RESET;
     }
 
     private void cleanupArena(String key, ActiveArena activeArena) {
@@ -1808,44 +1221,6 @@ public class GameManager {
         return count;
     }
 
-    private double calculateBeastWeight(Player player, RolePreference preference) {
-        PlayerTier tier = determineTier(player);
-        return switch (tier) {
-            case NJOG -> switch (preference) {
-                case BEAST -> 1.6d;
-                case RUNNER -> 0.4d;
-                default -> 1.0d;
-            };
-            case VIP -> switch (preference) {
-                case BEAST -> 1.4d;
-                case RUNNER -> 0.6d;
-                default -> 1.0d;
-            };
-            case NORMAL -> 1.0d;
-        };
-    }
-
-    private double fallbackBeastWeight(Player player) {
-        return switch (determineTier(player)) {
-            case NJOG -> 1.6d;
-            case VIP -> 1.4d;
-            case NORMAL -> 1.0d;
-        };
-    }
-
-    private PlayerTier determineTier(Player player) {
-        if (player == null) {
-            return PlayerTier.NORMAL;
-        }
-        if (player.hasPermission(PERM_PREFERENCE_NJOG)) {
-            return PlayerTier.NJOG;
-        }
-        if (player.hasPermission(PERM_PREFERENCE_VIP)) {
-            return PlayerTier.VIP;
-        }
-        return PlayerTier.NORMAL;
-    }
-
     private void send(Player player, String message) {
         player.sendMessage(prefix + message);
     }
@@ -1865,9 +1240,4 @@ public class GameManager {
                 && first.getBlockZ() == second.getBlockZ();
     }
 
-    private enum PlayerTier {
-        NORMAL,
-        VIP,
-        NJOG
-    }
 }
