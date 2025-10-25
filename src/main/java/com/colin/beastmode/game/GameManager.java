@@ -14,30 +14,14 @@ import org.bukkit.persistence.PersistentDataType;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 public class GameManager {
 
-    private final ArenaStorage arenaStorage;
     private final ActiveArenaDirectory arenaDirectory;
-    private final String prefix;
-    private final NamespacedKey exitTokenKey;
-    private final NamespacedKey preferenceKey;
-    private final ItemStack exitTokenTemplate;
-    private final PlayerSupportService playerSupport;
-    private final ArenaWaitingService waitingService;
-    private final ArenaLifecycleService arenaLifecycle;
-    private final ArenaBarrierService barrierService;
-    private final CountdownService countdowns;
-    private final RoleSelectionService roleSelection;
-    private final MatchSetupService matchSetup;
-    private final ArenaMessagingService messaging;
-    private final PlayerTransitionService playerTransitions;
-    private final MatchOutcomeService matchOutcome;
-    private final MatchFlowService matchFlow;
-    private final MatchSelectionService selectionService;
     private final ArenaStatusService statusService;
+    private final PlayerSupportService playerSupport;
+    private final RoleSelectionService roleSelection;
     private final MatchOrchestrationService orchestration;
     private final PlayerPreferenceService preferenceService;
     private final ArenaDepartureService departureService;
@@ -61,40 +45,24 @@ public class GameManager {
     }
 
     public GameManager(Beastmode plugin, ArenaStorage arenaStorage) {
-        this.arenaStorage = arenaStorage;
-        this.prefix = plugin.getConfig().getString("messages.prefix", "[Beastmode] ");
-        this.exitTokenKey = new NamespacedKey(plugin, "exit_token");
-        this.preferenceKey = new NamespacedKey(plugin, "preference_selector");
-        this.exitTokenTemplate = createExitToken();
-        ConcurrentHashMap<String, ActiveArena> arenaBacking = new ConcurrentHashMap<>();
-        this.arenaDirectory = new ActiveArenaDirectory(arenaBacking);
-        this.statusService = new ArenaStatusService();
-        this.playerSupport = new PlayerSupportService(plugin, prefix, LONG_EFFECT_DURATION_TICKS,
-            exitTokenKey, preferenceKey, exitTokenTemplate);
-        this.waitingService = new ArenaWaitingService(this.playerSupport, this.prefix);
-        this.barrierService = new ArenaBarrierService();
-        this.arenaLifecycle = new ArenaLifecycleService(this.arenaDirectory, this.barrierService, statusService::notifyArenaName);
-        this.countdowns = new CountdownService(plugin);
-        this.roleSelection = new RoleSelectionService(PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
-        this.matchSetup = new MatchSetupService(this.playerSupport, prefix);
-        this.messaging = new ArenaMessagingService(prefix, DEFAULT_BEAST_NAME);
-        this.playerTransitions = new PlayerTransitionService(plugin, this.playerSupport);
-        this.matchOutcome = new MatchOutcomeService(prefix, DEFAULT_BEAST_NAME, this.playerSupport, playerTransitions);
-        this.matchFlow = new MatchFlowService(plugin, countdowns, barrierService, playerSupport,
-            messaging, prefix, LONG_EFFECT_DURATION_TICKS);
-        this.selectionService = new MatchSelectionService(this.countdowns, this.roleSelection, this.matchSetup,
-            this.messaging, this.matchFlow, this.waitingService, this.arenaLifecycle, statusService::notifyArenaStatus);
-        this.preferenceService = new PlayerPreferenceService(this.arenaDirectory,
-            this.playerSupport, this.roleSelection, this.prefix);
-        this.departureService = new ArenaDepartureService(this.prefix, this.playerSupport, this.playerTransitions,
-            this.waitingService, this.arenaLifecycle, this.matchOutcome, statusService::notifyArenaStatus);
-        this.completionService = new MatchCompletionService(this.arenaDirectory, this.departureService);
-        this.eliminationService = new MatchEliminationService(this.arenaDirectory,
-            this.playerSupport, this.playerTransitions, this.departureService);
-        this.orchestration = new MatchOrchestrationService(this.arenaDirectory, this.arenaStorage, this.arenaLifecycle,
-            this.waitingService, this.selectionService, this.departureService, this.statusService, this.prefix);
-        this.queueService = new ArenaQueueService(this.arenaStorage, this.arenaDirectory,
-            this.playerSupport, this.roleSelection, this.waitingService, this.orchestration, this.statusService, this.prefix);
+        String prefix = plugin.getConfig().getString("messages.prefix", "[Beastmode] ");
+        NamespacedKey exitTokenKey = new NamespacedKey(plugin, "exit_token");
+        NamespacedKey preferenceKey = new NamespacedKey(plugin, "preference_selector");
+        ItemStack exitTokenTemplate = createExitToken(exitTokenKey);
+        GameServices services = GameServices.create(plugin, arenaStorage, prefix, exitTokenKey,
+            preferenceKey, exitTokenTemplate, LONG_EFFECT_DURATION_TICKS, DEFAULT_BEAST_NAME,
+            PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
+
+        this.arenaDirectory = services.arenaDirectory;
+        this.statusService = services.statusService;
+        this.playerSupport = services.playerSupport;
+        this.roleSelection = services.roleSelection;
+        this.preferenceService = services.preferenceService;
+        this.departureService = services.departureService;
+        this.completionService = services.completionService;
+        this.eliminationService = services.eliminationService;
+        this.orchestration = services.orchestration;
+        this.queueService = services.queueService;
     }
 
     public void registerStatusListener(Consumer<String> listener) {
@@ -114,7 +82,7 @@ public class GameManager {
     }
 
     public void joinArena(Player player, String arenaName, RolePreference preference) {
-    queueService.join(player, arenaName, preference);
+        queueService.join(player, arenaName, preference);
     }
 
     public void handlePlayerMove(Player player, Location from, Location to) {
@@ -140,7 +108,7 @@ public class GameManager {
             return;
         }
 
-    ActiveArena activeArena = arenaDirectory.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return;
         }
@@ -166,7 +134,7 @@ public class GameManager {
             return false;
         }
 
-    ActiveArena activeArena = arenaDirectory.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return false;
         }
@@ -183,7 +151,7 @@ public class GameManager {
             return false;
         }
 
-    ActiveArena activeArena = arenaDirectory.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
         if (activeArena == null) {
             return false;
         }
@@ -227,7 +195,7 @@ public class GameManager {
         orchestration.maybeStartCountdown(key, activeArena);
     }
 
-    private ItemStack createExitToken() {
+    private ItemStack createExitToken(NamespacedKey exitTokenKey) {
         ItemStack stack = new ItemStack(Material.NETHER_STAR);
         var meta = stack.getItemMeta();
         if (meta != null) {

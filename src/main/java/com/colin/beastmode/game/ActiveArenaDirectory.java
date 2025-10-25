@@ -3,6 +3,7 @@ package com.colin.beastmode.game;
 import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
 
@@ -12,6 +13,10 @@ import java.util.function.Supplier;
 final class ActiveArenaDirectory {
 
     private final ConcurrentMap<String, ActiveArena> arenas;
+
+    ActiveArenaDirectory() {
+        this(new ConcurrentHashMap<>());
+    }
 
     ActiveArenaDirectory(ConcurrentMap<String, ActiveArena> arenas) {
         this.arenas = arenas;
