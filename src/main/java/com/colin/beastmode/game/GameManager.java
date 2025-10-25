@@ -44,6 +44,7 @@ public class GameManager {
     private final MatchSelectionService selectionService;
     private final ArenaDepartureService departureService;
     private final MatchCompletionService completionService;
+    private final MatchEliminationService eliminationService;
     private final ArenaQueueService queueService;
     static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
@@ -86,6 +87,8 @@ public class GameManager {
         this.departureService = new ArenaDepartureService(this.prefix, this.playerSupport, this.playerTransitions,
             this.waitingService, this.arenaLifecycle, this.matchOutcome, this::notifyArenaStatus);
         this.completionService = new MatchCompletionService(this.activeArenas, this::findArenaByPlayer, this.departureService);
+        this.eliminationService = new MatchEliminationService(this.activeArenas, this::findArenaByPlayer,
+            this.playerSupport, this.playerTransitions, this.departureService);
         this.queueService = new ArenaQueueService(this.arenaStorage, this.activeArenas,
             this.playerSupport, this.roleSelection, this.waitingService, this.prefix);
     }
@@ -139,49 +142,7 @@ public class GameManager {
     }
 
     public void handlePlayerDeath(Player player) {
-        if (player == null) {
-            return;
-        }
-
-        UUID uuid = player.getUniqueId();
-        String key = findArenaByPlayer(uuid);
-        if (key == null) {
-            return;
-        }
-
-        ActiveArena activeArena = activeArenas.get(key);
-        if (activeArena == null) {
-            return;
-        }
-
-        if (!activeArena.isMatchActive()) {
-            playerTransitions.sendPlayerToSpawn(activeArena, player);
-            return;
-        }
-
-        Location deathLocation = player.getLocation() != null ? player.getLocation().clone() : null;
-        boolean wasRunner = activeArena.isRunner(uuid);
-        if (wasRunner) {
-            if (!activeArena.removeRunner(uuid)) {
-                return;
-            }
-
-            playerSupport.resetLoadout(player);
-            boolean finished = departureService.handleRunnerElimination(key, activeArena, player);
-            if (!finished) {
-                playerTransitions.sendToSpectator(activeArena, player, deathLocation);
-            }
-            return;
-        }
-
-        UUID beastId = activeArena.getBeastId();
-        if (beastId != null && beastId.equals(uuid)) {
-            playerSupport.resetLoadout(player);
-            if (!activeArena.isFinalPhase()) {
-                activeArena.setRewardSuppressed(true);
-            }
-            departureService.handleRunnerVictory(key, activeArena, null);
-        }
+        eliminationService.handlePlayerDeath(player);
     }
 
     public void handlePlayerQuit(Player player) {
