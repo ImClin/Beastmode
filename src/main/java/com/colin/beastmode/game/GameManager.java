@@ -1,7 +1,6 @@
 package com.colin.beastmode.game;
 
 import com.colin.beastmode.Beastmode;
-import com.colin.beastmode.model.ArenaDefinition;
 import com.colin.beastmode.storage.ArenaStorage;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -14,11 +13,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 public class GameManager {
@@ -29,7 +26,6 @@ public class GameManager {
     private final NamespacedKey exitTokenKey;
     private final NamespacedKey preferenceKey;
     private final ItemStack exitTokenTemplate;
-    private final List<Consumer<String>> statusListeners = new CopyOnWriteArrayList<>();
     private final PlayerSupportService playerSupport;
     private final ArenaWaitingService waitingService;
     private final ArenaLifecycleService arenaLifecycle;
@@ -42,6 +38,8 @@ public class GameManager {
     private final MatchOutcomeService matchOutcome;
     private final MatchFlowService matchFlow;
     private final MatchSelectionService selectionService;
+    private final ArenaStatusService statusService;
+    private final MatchOrchestrationService orchestration;
     private final PlayerPreferenceService preferenceService;
     private final ArenaDepartureService departureService;
     private final MatchCompletionService completionService;
@@ -49,7 +47,6 @@ public class GameManager {
     private final ArenaQueueService queueService;
     static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
-    private static final String MSG_ARENA_NOT_RUNNING = "Arena %s is not currently running.";
     private static final String PERM_PREFERENCE_VIP = "beastmode.preference.vip";
     private static final String PERM_PREFERENCE_NJOG = "beastmode.preference.njog";
     private static final String DEFAULT_BEAST_NAME = "The Beast";
@@ -70,11 +67,12 @@ public class GameManager {
         this.exitTokenKey = new NamespacedKey(plugin, "exit_token");
         this.preferenceKey = new NamespacedKey(plugin, "preference_selector");
         this.exitTokenTemplate = createExitToken();
+        this.statusService = new ArenaStatusService();
         this.playerSupport = new PlayerSupportService(plugin, prefix, LONG_EFFECT_DURATION_TICKS,
             exitTokenKey, preferenceKey, exitTokenTemplate);
         this.waitingService = new ArenaWaitingService(this.playerSupport, this.prefix);
         this.barrierService = new ArenaBarrierService();
-        this.arenaLifecycle = new ArenaLifecycleService(this.activeArenas, this.barrierService, this::notifyStatusListeners);
+        this.arenaLifecycle = new ArenaLifecycleService(this.activeArenas, this.barrierService, statusService::notifyArenaName);
         this.countdowns = new CountdownService(plugin);
         this.roleSelection = new RoleSelectionService(PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
         this.matchSetup = new MatchSetupService(this.playerSupport, prefix);
@@ -84,48 +82,30 @@ public class GameManager {
         this.matchFlow = new MatchFlowService(plugin, countdowns, barrierService, playerSupport,
             messaging, prefix, LONG_EFFECT_DURATION_TICKS);
         this.selectionService = new MatchSelectionService(this.countdowns, this.roleSelection, this.matchSetup,
-            this.messaging, this.matchFlow, this.waitingService, this.arenaLifecycle, this::notifyArenaStatus);
+            this.messaging, this.matchFlow, this.waitingService, this.arenaLifecycle, statusService::notifyArenaStatus);
         this.preferenceService = new PlayerPreferenceService(this.activeArenas, this::findArenaByPlayer,
             this.playerSupport, this.roleSelection, this.prefix);
         this.departureService = new ArenaDepartureService(this.prefix, this.playerSupport, this.playerTransitions,
-            this.waitingService, this.arenaLifecycle, this.matchOutcome, this::notifyArenaStatus);
+            this.waitingService, this.arenaLifecycle, this.matchOutcome, statusService::notifyArenaStatus);
         this.completionService = new MatchCompletionService(this.activeArenas, this::findArenaByPlayer, this.departureService);
         this.eliminationService = new MatchEliminationService(this.activeArenas, this::findArenaByPlayer,
             this.playerSupport, this.playerTransitions, this.departureService);
+        this.orchestration = new MatchOrchestrationService(this.activeArenas, this.arenaStorage, this.arenaLifecycle,
+            this.waitingService, this.selectionService, this.departureService, this.statusService, this.prefix);
         this.queueService = new ArenaQueueService(this.arenaStorage, this.activeArenas,
             this.playerSupport, this.roleSelection, this.waitingService, this.prefix);
     }
 
     public void registerStatusListener(Consumer<String> listener) {
-        if (listener != null) {
-            statusListeners.add(listener);
-        }
+        statusService.register(listener);
     }
 
     public void unregisterStatusListener(Consumer<String> listener) {
-        if (listener != null) {
-            statusListeners.remove(listener);
-        }
-    }
-
-    private void notifyStatusListeners(String arenaName) {
-        if (arenaName == null) {
-            return;
-        }
-        String trimmed = arenaName.trim();
-        if (trimmed.isEmpty()) {
-            return;
-        }
-        for (Consumer<String> listener : statusListeners) {
-            listener.accept(trimmed);
-        }
+        statusService.unregister(listener);
     }
 
     void notifyArenaStatus(ActiveArena activeArena) {
-        if (activeArena == null || activeArena.getArena() == null) {
-            return;
-        }
-        notifyStatusListeners(activeArena.getArena().getName());
+        orchestration.notifyArenaStatus(activeArena);
     }
 
     public void joinArena(Player player, String arenaName) {
@@ -211,46 +191,15 @@ public class GameManager {
     }
 
     public void cancelArena(Player player, String arenaName) {
-        if (arenaName == null || arenaName.trim().isEmpty()) {
-            send(player, ChatColor.RED + "Please specify an arena name.");
-            return;
-        }
-
-        String trimmed = arenaName.trim();
-        String key = trimmed.toLowerCase(Locale.ENGLISH);
-        ActiveArena activeArena = activeArenas.get(key);
-        if (activeArena == null) {
-            send(player, ChatColor.YELLOW + MSG_ARENA_NOT_RUNNING.formatted(highlightArena(trimmed)));
-            return;
-        }
-
-        List<Player> participants = arenaLifecycle.collectParticipants(activeArena);
-        for (Player participant : participants) {
-            send(participant, ChatColor.YELLOW + "The hunt was cancelled by " + player.getName() + ".");
-        }
-
-        arenaLifecycle.cleanupArena(key, activeArena);
-        send(player, ChatColor.GREEN + "Cancelled hunt for arena " + ChatColor.AQUA + activeArena.getArena().getName() + ChatColor.GREEN + ".");
+        orchestration.cancelArena(player, arenaName);
     }
 
     public boolean hasActiveArena(String arenaName) {
-        if (arenaName == null || arenaName.trim().isEmpty()) {
-            return false;
-        }
-
-        String key = arenaName.trim().toLowerCase(Locale.ENGLISH);
-        return activeArenas.containsKey(key);
+        return orchestration.hasActiveArena(arenaName);
     }
 
     public void shutdown() {
-        for (ActiveArena activeArena : activeArenas.values()) {
-            activeArena.cancelTasks();
-            arenaLifecycle.resetArenaState(activeArena);
-            activeArena.clearPlayers();
-            activeArena.setRunning(false);
-        }
-        activeArenas.clear();
-        departureService.shutdown();
+        orchestration.shutdown();
     }
 
     String findArenaByPlayer(UUID uuid) {
@@ -271,69 +220,15 @@ public class GameManager {
     }
 
     public ArenaStatus getArenaStatus(String arenaName) {
-        if (arenaName == null || arenaName.trim().isEmpty()) {
-            return ArenaStatus.unavailable("");
-        }
-
-        ArenaDefinition arena = arenaStorage.getArena(arenaName);
-        if (arena == null) {
-            return ArenaStatus.unavailable(arenaName.trim());
-        }
-
-        String key = arena.getName().toLowerCase(Locale.ENGLISH);
-        ActiveArena activeArena = activeArenas.get(key);
-
-        int playerCount = 0;
-        boolean running = false;
-        boolean selecting = false;
-        boolean matchActive = false;
-
-        if (activeArena != null) {
-            playerCount = arenaLifecycle.countActivePlayers(activeArena);
-            running = activeArena.isRunning();
-            selecting = activeArena.isSelecting();
-            matchActive = activeArena.isMatchActive();
-        }
-
-        int capacity = waitingService.getQueueLimit(arena);
-        if (capacity == Integer.MAX_VALUE) {
-            capacity = -1;
-        }
-
-    return new ArenaStatus(arena.getName(), true, arena.isComplete(), playerCount, capacity,
-        running, selecting, matchActive);
+        return orchestration.getArenaStatus(arenaName);
     }
 
     void startMatch(String key, ActiveArena activeArena) {
-        if (activeArena.isRunning() || activeArena.isSelecting() || activeArena.isMatchActive()) {
-            return;
-        }
-
-        List<Player> participants = arenaLifecycle.collectParticipants(activeArena);
-        if (participants.isEmpty()) {
-            arenaLifecycle.cleanupArena(key, activeArena);
-            return;
-        }
-
-        activeArena.setRunning(true);
-        activeArena.clearMatchState();
-        activeArena.enableDamageProtection();
-        notifyArenaStatus(activeArena);
-        if (activeArena.isRunnerWallOpened() || activeArena.isBeastWallOpened()) {
-            arenaLifecycle.resetArenaState(activeArena);
-        }
-        ArenaDefinition arena = activeArena.getArena();
-        if (!waitingService.sendPlayersToWaiting(arena, participants)) {
-            activeArena.setRunning(false);
-            arenaLifecycle.cleanupArena(key, activeArena);
-            return;
-        }
-
-        maybeStartCountdown(key, activeArena);
+        orchestration.startMatch(key, activeArena);
     }
 
     void maybeStartCountdown(String key, ActiveArena activeArena) {
-        selectionService.maybeStartSelection(key, activeArena);
+        orchestration.maybeStartCountdown(key, activeArena);
     }
 
     private ItemStack createExitToken() {
@@ -364,14 +259,6 @@ public class GameManager {
 
     public void handlePreferenceItemUse(Player player, ItemStack stack) {
         preferenceService.handlePreferenceItemUse(player, stack);
-    }
-
-    private String highlightArena(String arenaName) {
-        return ChatColor.AQUA + arenaName + ChatColor.RESET;
-    }
-
-    private void send(Player player, String message) {
-        player.sendMessage(prefix + message);
     }
 
 }
