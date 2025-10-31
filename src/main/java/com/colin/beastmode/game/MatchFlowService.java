@@ -30,6 +30,7 @@ final class MatchFlowService {
     private final ArenaMessagingService messaging;
     private final String prefix;
     private final int longEffectDurationTicks;
+    private final TimeTrialService timeTrials;
 
     MatchFlowService(Beastmode plugin,
                      CountdownService countdowns,
@@ -37,7 +38,8 @@ final class MatchFlowService {
                      PlayerSupportService playerSupport,
                      ArenaMessagingService messaging,
                      String prefix,
-                     int longEffectDurationTicks) {
+                     int longEffectDurationTicks,
+                     TimeTrialService timeTrials) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.countdowns = Objects.requireNonNull(countdowns, "countdowns");
         this.barrierService = Objects.requireNonNull(barrierService, "barrierService");
@@ -45,6 +47,7 @@ final class MatchFlowService {
         this.messaging = Objects.requireNonNull(messaging, "messaging");
         this.prefix = Objects.requireNonNull(prefix, "prefix");
         this.longEffectDurationTicks = longEffectDurationTicks;
+        this.timeTrials = Objects.requireNonNull(timeTrials, "timeTrials");
     }
 
     void scheduleMatchStart(ActiveArena activeArena,
@@ -100,8 +103,8 @@ final class MatchFlowService {
         }
 
         messaging.teleportCountdown(current, 0);
-        teleportParticipants(arena, current, beast);
-    scheduleRunnerGate(arena, activeArena, beast, current, participantSupplier, cleanupAction);
+        teleportParticipants(activeArena, arena, current, beast);
+        scheduleRunnerGate(arena, activeArena, beast, current, participantSupplier, cleanupAction);
     }
 
     private void scheduleRunnerGate(ArenaDefinition arena,
@@ -110,8 +113,12 @@ final class MatchFlowService {
                                     List<Player> initialParticipants,
                                     Supplier<List<Player>> participantSupplier,
                                     Consumer<Boolean> cleanupAction) {
+        boolean timeTrial = activeArena != null && activeArena.isTimeTrial();
         int runnerDelay = Math.max(arena.getRunnerWallDelaySeconds(), 0);
         int beastDelay = Math.max(arena.getBeastReleaseDelaySeconds(), 0);
+        if (timeTrial) {
+            runnerDelay = 0;
+        }
 
         Runnable runnerOpenAction = () -> {
             List<Player> current = participantSupplier.get();
@@ -119,8 +126,13 @@ final class MatchFlowService {
                 cleanupAction.accept(true);
                 return;
             }
-            messaging.broadcastGo(current);
             openRunnerGate(activeArena, arena);
+            if (timeTrial) {
+                timeTrials.startRun(activeArena, current);
+                return;
+            }
+
+            messaging.broadcastGo(current);
             if (beast == null) {
                 messaging.practiceReminder(current);
                 cleanupAction.accept(false);
@@ -130,7 +142,20 @@ final class MatchFlowService {
         };
 
         if (runnerDelay <= 0) {
-            runnerOpenAction.run();
+            if (timeTrial) {
+                BukkitTask[] holder = new BukkitTask[1];
+                holder[0] = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (activeArena != null) {
+                        activeArena.unregisterTask(holder[0]);
+                    }
+                    runnerOpenAction.run();
+                }, 1L);
+                if (activeArena != null) {
+                    activeArena.registerTask(holder[0]);
+                }
+            } else {
+                runnerOpenAction.run();
+            }
             return;
         }
 
@@ -181,14 +206,15 @@ final class MatchFlowService {
                 beastOpenAction);
     }
 
-    private void teleportParticipants(ArenaDefinition arena, List<Player> players, Player beast) {
-        if (arena.getBeastSpawn() == null || arena.getRunnerSpawn() == null) {
+    private void teleportParticipants(ActiveArena activeArena, ArenaDefinition arena, List<Player> players, Player beast) {
+        if (arena == null || arena.getRunnerSpawn() == null) {
             return;
         }
-        Location beastLocation = arena.getBeastSpawn().clone();
+        boolean timeTrial = activeArena != null && activeArena.isTimeTrial();
         Location runnerLocation = arena.getRunnerSpawn().clone();
+        Location beastLocation = !timeTrial && arena.getBeastSpawn() != null ? arena.getBeastSpawn().clone() : null;
         Bukkit.getScheduler().runTask(plugin, () -> {
-            if (beast != null && beast.isOnline()) {
+            if (!timeTrial && beastLocation != null && beast != null && beast.isOnline()) {
                 playerSupport.clearPreferenceSelectors(beast);
                 beast.teleport(beastLocation);
                 beast.setGameMode(GameMode.ADVENTURE);
@@ -202,10 +228,19 @@ final class MatchFlowService {
                     playerSupport.clearPreferenceSelectors(runner);
                     runner.teleport(runnerLocation);
                     runner.setGameMode(GameMode.ADVENTURE);
-                    playerSupport.restoreVitals(runner);
+                    if (timeTrial) {
+                        playerSupport.resetLoadout(runner);
+                        playerSupport.restoreVitals(runner);
+                        playerSupport.giveTimeTrialRestartItem(runner);
+                    } else {
+                        playerSupport.restoreVitals(runner);
+                    }
                 }
             }
-            if (playerSupport.applyBeastLoadout(beast)) {
+            if (timeTrial) {
+                playerSupport.hideTimeTrialParticipants(players);
+            }
+            if (!timeTrial && beast != null && playerSupport.applyBeastLoadout(beast)) {
                 send(beast, ChatColor.DARK_RED + "" + ChatColor.BOLD + "You gear up in unbreakable armor.");
             }
         });

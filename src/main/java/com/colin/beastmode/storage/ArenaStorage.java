@@ -1,6 +1,7 @@
 package com.colin.beastmode.storage;
 
 import com.colin.beastmode.Beastmode;
+import com.colin.beastmode.game.GameModeType;
 import com.colin.beastmode.model.ArenaDefinition;
 import com.colin.beastmode.model.Cuboid;
 import org.bukkit.Bukkit;
@@ -12,6 +13,7 @@ import org.bukkit.configuration.file.FileConfiguration;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -61,7 +63,16 @@ public class ArenaStorage {
         Location runnerSpawn = readLocation(section.getConfigurationSection("runnerSpawn"));
         Location beastSpawn = readLocation(section.getConfigurationSection("beastSpawn"));
         Location waitingSpawn = readLocation(section.getConfigurationSection("waitingSpawn"));
-            int runnerDelay = section.getInt("runnerWallDelaySeconds", -1);
+            String modeName = section.getString("gameMode", GameModeType.HUNT.name());
+            GameModeType mode;
+            try {
+                mode = modeName != null ? GameModeType.valueOf(modeName.toUpperCase(Locale.ENGLISH)) : GameModeType.HUNT;
+            } catch (IllegalArgumentException ex) {
+                logger.log(Level.WARNING, "Unknown game mode '{0}' for arena {1}; defaulting to HUNT.", new Object[]{modeName, key});
+                mode = GameModeType.HUNT;
+            }
+
+            int runnerDelay = section.getInt("runnerWallDelaySeconds", mode.isTimeTrial() ? 0 : -1);
             int beastDelay = section.getInt("beastReleaseDelaySeconds", -1);
             int beastSpeed = Math.max(section.getInt("beastSpeedLevel", 1), 0);
         int minRunners = Math.max(section.getInt("minRunners", 1), 1);
@@ -78,6 +89,7 @@ public class ArenaStorage {
             ArenaDefinition arena = ArenaDefinition.builder(key)
                     .runnerWall(runnerWall)
                     .beastWall(beastWall)
+            .gameMode(mode)
             .finishRegion(legacyFinish)
             .finishButton(finishButton)
                     .runnerSpawn(runnerSpawn)
@@ -102,6 +114,7 @@ public class ArenaStorage {
         writeCuboid(section.createSection("runnerWall"), arena.getRunnerWall());
         writeCuboid(section.createSection("beastWall"), arena.getBeastWall());
         section.set("finishRegion", null);
+        section.set("gameMode", arena.getGameModeType().name());
         writeLocation(section.createSection("finishButton"), arena.getFinishButton());
         writeLocation(section.createSection("runnerSpawn"), arena.getRunnerSpawn());
         writeLocation(section.createSection("beastSpawn"), arena.getBeastSpawn());

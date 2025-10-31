@@ -65,6 +65,22 @@ final class MatchEliminationService {
         }
 
         playerSupport.resetLoadout(player);
+        if (activeArena.isTimeTrial()) {
+            boolean othersRemain = activeArena.hasRunners();
+            if (othersRemain) {
+                departures.handleRunnerElimination(key, activeArena, player);
+            } else {
+                activeArena.setMatchActive(false);
+                departures.handleRunnerVictory(key, activeArena, null);
+            }
+            activeArena.removeTimeTrialStart(uuid);
+            playerSupport.removeTimeTrialRestartItem(player);
+            playerSupport.revealTimeTrialParticipant(player);
+            transitions.sendPlayerToSpawn(activeArena, player);
+            activeArena.removePlayer(uuid);
+            return;
+        }
+
         boolean matchFinished = departures.handleRunnerElimination(key, activeArena, player);
         if (!matchFinished) {
             transitions.sendToSpectator(activeArena, player, deathLocation);

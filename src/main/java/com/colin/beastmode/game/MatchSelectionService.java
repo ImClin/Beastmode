@@ -46,11 +46,17 @@ final class MatchSelectionService {
         }
 
         ArenaDefinition arena = activeArena.getArena();
-        int required = waitingService.getRequiredParticipants(arena);
+        GameModeType mode = activeArena.getMode();
+        int required = waitingService.getRequiredParticipants(arena, mode);
         if (participants.size() < required) {
             activeArena.setSelecting(false);
             statusNotifier.accept(activeArena);
             waitingService.notifyWaitingForPlayers(activeArena, participants);
+            return;
+        }
+
+        if (mode.isTimeTrial()) {
+            startTimeTrial(key, activeArena, participants);
             return;
         }
 
@@ -62,7 +68,7 @@ final class MatchSelectionService {
         statusNotifier.accept(activeArena);
         countdowns.startSelectionCountdown(activeArena, 10, 5,
                 () -> lifecycle.collectParticipants(activeArena),
-                () -> waitingService.getRequiredParticipants(activeArena.getArena()),
+                () -> waitingService.getRequiredParticipants(activeArena.getArena(), activeArena.getMode()),
                 players -> {
                     activeArena.setSelecting(false);
                     statusNotifier.accept(activeArena);
@@ -76,7 +82,7 @@ final class MatchSelectionService {
     private void startWheelSelection(String key, ActiveArena activeArena, int durationSeconds) {
         countdowns.startWheelSelection(activeArena, durationSeconds,
                 () -> lifecycle.collectParticipants(activeArena),
-                () -> waitingService.getRequiredParticipants(activeArena.getArena()),
+                () -> waitingService.getRequiredParticipants(activeArena.getArena(), activeArena.getMode()),
                 players -> {
                     activeArena.setSelecting(false);
                     statusNotifier.accept(activeArena);
@@ -100,7 +106,7 @@ final class MatchSelectionService {
         }
 
         ArenaDefinition arena = activeArena.getArena();
-        if (!matchSetup.validateSpawns(current, arena)) {
+        if (!matchSetup.validateSpawns(current, arena, activeArena.getMode())) {
             lifecycle.cleanupArena(key, activeArena);
             return;
         }
@@ -110,6 +116,33 @@ final class MatchSelectionService {
         statusNotifier.accept(activeArena);
         messaging.announceBeast(current, beast);
         matchFlow.scheduleMatchStart(activeArena, arena, beast,
+                () -> lifecycle.collectParticipants(activeArena),
+                restoreWalls -> lifecycle.cleanupArena(key, activeArena, restoreWalls),
+                () -> {
+                    activeArena.setMatchActive(true);
+                    statusNotifier.accept(activeArena);
+                });
+    }
+
+    private void startTimeTrial(String key,
+                                ActiveArena activeArena,
+                                List<Player> participants) {
+        List<Player> current = matchSetup.resolveParticipants(activeArena, participants);
+        if (current.isEmpty()) {
+            lifecycle.cleanupArena(key, activeArena);
+            return;
+        }
+
+        ArenaDefinition arena = activeArena.getArena();
+        if (!matchSetup.validateSpawns(current, arena, GameModeType.TIME_TRIAL)) {
+            lifecycle.cleanupArena(key, activeArena);
+            return;
+        }
+
+        matchSetup.assignRoles(activeArena, current, null);
+        statusNotifier.accept(activeArena);
+        messaging.announceBeast(current, null);
+        matchFlow.scheduleMatchStart(activeArena, arena, null,
                 () -> lifecycle.collectParticipants(activeArena),
                 restoreWalls -> lifecycle.cleanupArena(key, activeArena, restoreWalls),
                 () -> {

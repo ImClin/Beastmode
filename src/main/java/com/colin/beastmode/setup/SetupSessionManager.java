@@ -4,6 +4,7 @@ import com.colin.beastmode.Beastmode;
 import com.colin.beastmode.model.ArenaDefinition;
 import com.colin.beastmode.model.Cuboid;
 import com.colin.beastmode.storage.ArenaStorage;
+import com.colin.beastmode.game.GameModeType;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -38,6 +39,10 @@ public class SetupSessionManager {
     }
 
     public boolean startSession(Player player, String arenaName) {
+        return startSession(player, arenaName, GameModeType.HUNT);
+    }
+
+    public boolean startSession(Player player, String arenaName, GameModeType mode) {
         if (!player.hasPermission("beastmode.command")) {
             send(player, ChatColor.RED + "You do not have permission to use this command.");
             return false;
@@ -61,7 +66,8 @@ public class SetupSessionManager {
             send(player, ChatColor.YELLOW + "An arena with that name already exists. Completing this setup will overwrite it.");
         }
 
-        SetupSession session = new SetupSession(player.getUniqueId(), arenaName);
+        GameModeType sessionMode = mode != null ? mode : GameModeType.HUNT;
+        SetupSession session = new SetupSession(player.getUniqueId(), arenaName, sessionMode);
         sessions.put(player.getUniqueId(), session);
         giveWand(player);
         send(player, ChatColor.GREEN + "Setup started for arena " + ChatColor.AQUA + arenaName + ChatColor.GREEN + ".");
@@ -167,7 +173,11 @@ public class SetupSessionManager {
                 }
                 session.setRunnerSpawn(location.clone());
                 send(player, ChatColor.GREEN + "Runner spawn saved.");
-                advanceStage(session, SetupStage.BEAST_SPAWN);
+                if (session.isTimeTrial()) {
+                    advanceStage(session, SetupStage.FINISH_BUTTON);
+                } else {
+                    advanceStage(session, SetupStage.BEAST_SPAWN);
+                }
                 return true;
             }
             case BEAST_SPAWN -> {
@@ -351,6 +361,16 @@ public class SetupSessionManager {
     }
 
     private void sendStageInstruction(Player player, SetupStage stage) {
+        SetupSession session = sessions.get(player.getUniqueId());
+        if (session != null && session.isTimeTrial()) {
+            String message = switch (stage) {
+                case RUNNER_SPAWN -> "Stand at the time-trial start point and run /beastmode setspawn <arena> runner.";
+                case FINISH_BUTTON -> "Click the finish button for this trial with the setup wand.";
+                default -> stage.getFriendlyDescription();
+            };
+            send(player, ChatColor.AQUA + message);
+            return;
+        }
         send(player, ChatColor.AQUA + stage.getFriendlyDescription());
     }
 
@@ -463,7 +483,7 @@ public class SetupSessionManager {
             return false;
         }
 
-        SetupSession session = new SetupSession(player.getUniqueId(), arena.getName());
+    SetupSession session = new SetupSession(player.getUniqueId(), arena.getName(), arena.getGameModeType());
         session.setMode(mode);
         session.setStage(stage);
         sessions.put(player.getUniqueId(), session);
@@ -487,7 +507,7 @@ public class SetupSessionManager {
             return false;
         }
 
-        SetupSession session = new SetupSession(player.getUniqueId(), arena.getName());
+    SetupSession session = new SetupSession(player.getUniqueId(), arena.getName(), arena.getGameModeType());
         session.setMode(mode);
         session.setStage(stage);
         if (stage == SetupStage.MIN_RUNNERS) {

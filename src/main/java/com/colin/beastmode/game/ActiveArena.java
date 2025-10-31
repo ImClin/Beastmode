@@ -23,6 +23,7 @@ final class ActiveArena {
     private final Set<BukkitTask> trackedTasks = new HashSet<>();
     private final Set<UUID> spectatingRunners = new HashSet<>();
     private final Map<UUID, RolePreference> preferences = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> timeTrialStarts = new ConcurrentHashMap<>();
     private List<BlockState> runnerWallSnapshot;
     private List<BlockState> beastWallSnapshot;
     private boolean running;
@@ -34,6 +35,7 @@ final class ActiveArena {
     private boolean rewardSuppressed;
     private long invulnerabilityUntilMillis;
     private UUID beastId;
+    private GameModeType mode = GameModeType.HUNT;
 
     ActiveArena(ArenaDefinition arena) {
         this.arena = arena;
@@ -59,6 +61,7 @@ final class ActiveArena {
         players.clear();
         preferences.clear();
         clearMatchState();
+        mode = GameModeType.HUNT;
     }
 
     void registerTask(BukkitTask task) {
@@ -169,6 +172,12 @@ final class ActiveArena {
         return runners.remove(uuid);
     }
 
+    void addRunner(UUID uuid) {
+        if (uuid != null) {
+            runners.add(uuid);
+        }
+    }
+
     boolean hasRunners() {
         return !runners.isEmpty();
     }
@@ -245,6 +254,40 @@ final class ActiveArena {
         beastId = null;
         runners.clear();
         spectatingRunners.clear();
+        timeTrialStarts.clear();
+    }
+
+    GameModeType getMode() {
+        return mode;
+    }
+
+    void setMode(GameModeType mode) {
+        this.mode = mode != null ? mode : GameModeType.HUNT;
+    }
+
+    boolean isTimeTrial() {
+        return mode == GameModeType.TIME_TRIAL;
+    }
+
+    void setTimeTrialStart(UUID uuid, long startMillis) {
+        if (uuid != null) {
+            timeTrialStarts.put(uuid, startMillis);
+        }
+    }
+
+    Long removeTimeTrialStart(UUID uuid) {
+        if (uuid == null) {
+            return null;
+        }
+        return timeTrialStarts.remove(uuid);
+    }
+
+    void clearTimeTrialStarts() {
+        timeTrialStarts.clear();
+    }
+
+    java.util.Map<java.util.UUID, Long> getTimeTrialStartSnapshot() {
+        return new java.util.HashMap<>(timeTrialStarts);
     }
 
     List<BlockState> getRunnerWallSnapshot() {

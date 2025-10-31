@@ -1,12 +1,16 @@
 package com.colin.beastmode.command;
 
 import com.colin.beastmode.game.GameManager;
+import com.colin.beastmode.game.GameModeType;
 import com.colin.beastmode.gui.ArenaMenu;
 import com.colin.beastmode.model.ArenaDefinition;
 import com.colin.beastmode.setup.SetupSessionManager;
 import com.colin.beastmode.setup.SetupSpawnType;
 import com.colin.beastmode.storage.ArenaStorage;
+import com.colin.beastmode.time.TimeTrialRecord;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -18,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 public class BeastmodeCommand implements CommandExecutor, TabCompleter {
 
@@ -27,6 +32,8 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
     private static final String SUB_CANCEL = "cancel";
     private static final String SUB_DELETE = "delete";
     private static final String SUB_JOIN = "join";
+    private static final String SUB_TRIAL = "trial";
+    private static final String SUB_TRIAL_CLEAR = "trialclear";
     private static final String SUB_EDIT = "edit";
     private static final String ROLE_RUNNER = "runner";
     private static final String ROLE_BEAST = "beast";
@@ -71,6 +78,12 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
                 return true;
             case SUB_JOIN:
                 handleJoin(player, args);
+                return true;
+            case SUB_TRIAL:
+                handleTrial(player, args);
+                return true;
+            case SUB_TRIAL_CLEAR:
+                handleTrialClear(player, args);
                 return true;
             case SUB_CANCEL:
                 handleCancel(player, args);
@@ -135,11 +148,21 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
 
     private void handleCreate(Player player, String[] args) {
         if (args.length < 2) {
-            sessionManager.sendPrefixed(player, ChatColor.RED + "Usage: /beastmode create <arenaName>");
+            sessionManager.sendPrefixed(player, ChatColor.RED + "Usage: /beastmode create <arenaName> [trial|hunt]");
             return;
         }
         String arenaName = args[1];
-        sessionManager.startSession(player, arenaName);
+        GameModeType mode = GameModeType.HUNT;
+        if (args.length >= 3) {
+            String modeArg = args[2].toLowerCase(Locale.ENGLISH);
+            if (modeArg.equals("trial") || modeArg.equals("timetrial") || modeArg.equals("time") || modeArg.equals("practice")) {
+                mode = GameModeType.TIME_TRIAL;
+            } else if (!modeArg.equals("hunt") && !modeArg.equals("normal")) {
+                sessionManager.sendPrefixed(player, ChatColor.RED + "Unknown mode '" + modeArg + "'. Use 'trial' or 'hunt'.");
+                return;
+            }
+        }
+        sessionManager.startSession(player, arenaName, mode);
     }
 
     private void handleSetSpawn(Player player, String[] args) {
@@ -190,6 +213,77 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
         gameManager.joinArena(player, arenaName, preference);
     }
 
+    private void handleTrial(Player player, String[] args) {
+        if (args.length < 2) {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "Usage: /beastmode trial <arenaName>");
+            return;
+        }
+
+        String arenaName = args[1];
+        gameManager.joinTimeTrial(player, arenaName);
+    }
+
+    private void handleTrialClear(Player player, String[] args) {
+        if (!player.hasPermission("beastmode.command")) {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "You do not have permission to manage time-trial records.");
+            return;
+        }
+        if (args.length < 3) {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "Usage: /beastmode trialclear <arenaName> <player|uuid>");
+            return;
+        }
+
+        String arenaName = args[1];
+        ArenaDefinition arena = arenaStorage.getArena(arenaName);
+        if (arena == null) {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "Arena '" + arenaName + "' was not found.");
+            return;
+        }
+        if (!arena.isTimeTrial()) {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "Arena '" + arena.getName() + "' does not store time-trial records.");
+            return;
+        }
+
+        String targetArg = args[2];
+        boolean removed = false;
+        UUID targetId = null;
+        try {
+            targetId = UUID.fromString(targetArg);
+        } catch (IllegalArgumentException ignored) {
+            // Not a UUID, fall through to name lookup.
+        }
+
+        if (targetId != null) {
+            removed = gameManager.getTimeTrials().deleteRecord(arena.getName(), targetId);
+        }
+
+        if (!removed) {
+            OfflinePlayer offline = Bukkit.getPlayerExact(targetArg);
+            if (offline == null) {
+                @SuppressWarnings("deprecation")
+                OfflinePlayer fetched = Bukkit.getOfflinePlayer(targetArg);
+                offline = fetched;
+            }
+            if (offline != null && (offline.hasPlayedBefore() || offline.isOnline())) {
+                removed = gameManager.getTimeTrials().deleteRecord(arena.getName(), offline.getUniqueId());
+            }
+        }
+
+        if (!removed) {
+            removed = gameManager.getTimeTrials().deleteRecordByName(arena.getName(), targetArg);
+        }
+
+        if (removed) {
+            sessionManager.sendPrefixed(player, ChatColor.GREEN + "Cleared best time for "
+                    + ChatColor.AQUA + targetArg + ChatColor.GREEN + " on arena "
+                    + ChatColor.AQUA + arena.getName() + ChatColor.GREEN + ".");
+        } else {
+            sessionManager.sendPrefixed(player, ChatColor.RED + "No time-trial record found for "
+                    + ChatColor.AQUA + targetArg + ChatColor.RED + " on arena "
+                    + ChatColor.AQUA + arena.getName() + ChatColor.RED + ".");
+        }
+    }
+
     private GameManager.RolePreference parsePreference(String input) {
         if (input == null) {
             return null;
@@ -213,18 +307,51 @@ public class BeastmodeCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 1) {
-            List<String> options = List.of(SUB_CREATE, SUB_SETSPAWN, SUB_SETWAITING, SUB_JOIN, SUB_CANCEL, SUB_DELETE, SUB_EDIT);
+            List<String> options = List.of(SUB_CREATE, SUB_SETSPAWN, SUB_SETWAITING, SUB_JOIN, SUB_TRIAL, SUB_TRIAL_CLEAR, SUB_CANCEL, SUB_DELETE, SUB_EDIT);
             return StringUtil.copyPartialMatches(args[0], options, new ArrayList<>());
         }
 
         String sub = args[0].toLowerCase(Locale.ENGLISH);
-        if (args.length == 2 && (sub.equals(SUB_SETSPAWN) || sub.equals(SUB_SETWAITING) || sub.equals(SUB_JOIN)
-                || sub.equals(SUB_CANCEL) || sub.equals(SUB_DELETE) || sub.equals(SUB_EDIT))) {
+    if (args.length == 2 && (sub.equals(SUB_SETSPAWN)
+        || sub.equals(SUB_SETWAITING)
+        || sub.equals(SUB_JOIN)
+        || sub.equals(SUB_TRIAL)
+        || sub.equals(SUB_TRIAL_CLEAR)
+        || sub.equals(SUB_CANCEL)
+        || sub.equals(SUB_DELETE)
+        || sub.equals(SUB_EDIT))) {
             return arenaStorage.getArenas().stream()
                     .map(ArenaDefinition::getName)
                     .filter(name -> StringUtil.startsWithIgnoreCase(name, args[1]))
                     .sorted(String.CASE_INSENSITIVE_ORDER)
                     .toList();
+        }
+
+        if (args.length == 3 && sub.equals(SUB_CREATE)) {
+            List<String> options = List.of("trial", "hunt");
+            return StringUtil.copyPartialMatches(args[2], options, new ArrayList<>());
+        }
+
+        if (args.length == 3 && sub.equals(SUB_TRIAL_CLEAR)) {
+            ArenaDefinition arena = arenaStorage.getArena(args[1]);
+            if (arena == null || !arena.isTimeTrial()) {
+                return Collections.emptyList();
+            }
+            List<TimeTrialRecord> records = gameManager.getTimeTrials().getTopRecords(arena.getName(), 20);
+            if (records.isEmpty()) {
+                return Collections.emptyList();
+            }
+            java.util.Set<String> suggestions = new java.util.LinkedHashSet<>();
+            for (TimeTrialRecord record : records) {
+                if (record == null) {
+                    continue;
+                }
+                if (record.getPlayerName() != null && !record.getPlayerName().isBlank()) {
+                    suggestions.add(record.getPlayerName());
+                }
+                suggestions.add(record.getPlayerId().toString());
+            }
+            return StringUtil.copyPartialMatches(args[2], suggestions, new ArrayList<>());
         }
 
         if (args.length == 3 && sub.equals(SUB_SETSPAWN)) {

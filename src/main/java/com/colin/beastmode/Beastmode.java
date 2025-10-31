@@ -10,6 +10,7 @@ import com.colin.beastmode.listeners.ChatInputListener;
 import com.colin.beastmode.listeners.GameListener;
 import com.colin.beastmode.listeners.SelectionListener;
 import com.colin.beastmode.listeners.SignListener;
+import com.colin.beastmode.placeholder.TimeTrialPlaceholder;
 import com.colin.beastmode.setup.SetupSessionManager;
 import com.colin.beastmode.storage.ArenaStorage;
 import org.bukkit.command.PluginCommand;
@@ -38,6 +39,7 @@ public final class Beastmode extends JavaPlugin {
 
         registerCommands();
         registerListeners();
+    registerPlaceholders();
     }
 
     @Override
@@ -94,5 +96,12 @@ public final class Beastmode extends JavaPlugin {
         pluginManager.registerEvents(new ArenaEditMenuListener(arenaEditMenu), this);
     pluginManager.registerEvents(new SignListener(this, arenaStorage, gameManager, messagePrefix), this);
         pluginManager.registerEvents(new GameListener(gameManager), this);
+    }
+
+    private void registerPlaceholders() {
+        PluginManager pluginManager = getServer().getPluginManager();
+        if (pluginManager.isPluginEnabled("PlaceholderAPI")) {
+            new TimeTrialPlaceholder(gameManager).register();
+        }
     }
 }

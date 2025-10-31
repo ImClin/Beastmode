@@ -19,6 +19,7 @@ final class ArenaQueueService {
     private final ArenaWaitingService waitingService;
     private final MatchOrchestrationService orchestration;
     private final ArenaStatusService statusService;
+    private final TimeTrialService timeTrials;
     private final String prefix;
 
     ArenaQueueService(ArenaStorage arenaStorage,
@@ -28,6 +29,7 @@ final class ArenaQueueService {
                       ArenaWaitingService waitingService,
                       MatchOrchestrationService orchestration,
                       ArenaStatusService statusService,
+                      TimeTrialService timeTrials,
                       String prefix) {
         this.arenaStorage = arenaStorage;
         this.arenaDirectory = arenaDirectory;
@@ -36,11 +38,23 @@ final class ArenaQueueService {
         this.waitingService = waitingService;
         this.orchestration = orchestration;
         this.statusService = statusService;
+        this.timeTrials = timeTrials;
         this.prefix = prefix;
     }
 
     void join(Player player,
               String arenaName,
+              GameManager.RolePreference desiredPreference) {
+        join(player, arenaName, GameModeType.HUNT, desiredPreference);
+    }
+
+    void joinTimeTrial(Player player, String arenaName) {
+        join(player, arenaName, GameModeType.TIME_TRIAL, GameManager.RolePreference.ANY);
+    }
+
+    void join(Player player,
+              String arenaName,
+              GameModeType mode,
               GameManager.RolePreference desiredPreference) {
         if (player == null) {
             return;
@@ -56,11 +70,24 @@ final class ArenaQueueService {
             send(player, ChatColor.RED + GameManager.MSG_ARENA_NOT_FOUND.formatted(highlight(arenaName)));
             return;
         }
+        if (mode.isTimeTrial() && !arena.isTimeTrial()) {
+            send(player, ChatColor.RED + "Arena " + highlight(arena.getName()) + ChatColor.RED + " is not configured for time trials.");
+            return;
+        }
+        if (!mode.isTimeTrial() && arena.isTimeTrial()) {
+            send(player, ChatColor.RED + "Arena " + highlight(arena.getName()) + " only supports time trials. Use /beastmode trial "
+                    + highlight(arena.getName()) + ChatColor.RED + ".");
+            return;
+        }
         if (!arena.isComplete()) {
             send(player, ChatColor.RED + GameManager.MSG_ARENA_INCOMPLETE.formatted(highlight(arena.getName())));
             return;
         }
-        if (arena.getRunnerSpawn() == null || arena.getBeastSpawn() == null) {
+        if (arena.getRunnerSpawn() == null) {
+            send(player, ChatColor.RED + "Arena spawns are missing. Reconfigure the arena before joining.");
+            return;
+        }
+        if (!mode.isTimeTrial() && arena.getBeastSpawn() == null) {
             send(player, ChatColor.RED + "Arena spawns are missing. Reconfigure the arena before joining.");
             return;
         }
@@ -70,20 +97,34 @@ final class ArenaQueueService {
             return;
         }
 
-        GameManager.RolePreference preference = sanitizePreference(player, desiredPreference);
+        GameManager.RolePreference preference = mode.isTimeTrial()
+                ? GameManager.RolePreference.ANY
+                : sanitizePreference(player, desiredPreference);
 
         String key = arena.getName().toLowerCase(Locale.ENGLISH);
-    ActiveArena activeArena = arenaDirectory.computeIfAbsent(key, () -> new ActiveArena(arena));
-        if (activeArena.isMatchActive()) {
+        ActiveArena activeArena = arenaDirectory.computeIfAbsent(key, () -> new ActiveArena(arena));
+
+        if (!ensureModeCompatible(player, activeArena, mode)) {
+            return;
+        }
+
+        if (activeArena.isMatchActive() && !mode.isTimeTrial()) {
             send(player, ChatColor.RED + "That arena is already in a hunt. Try again in a moment.");
             return;
         }
 
-    if (isQueueFull(arena, activeArena)) {
-            int maxRunners = arena.getMaxRunners();
-            send(player, ChatColor.RED + "That arena already has the maximum of "
-            + ChatColor.AQUA + waitingService.formatRunnerCount(maxRunners) + ChatColor.RED
-                    + " (plus the Beast). Try again later.");
+        int queueLimit = waitingService.getQueueLimit(arena, mode);
+        if (queueLimit != Integer.MAX_VALUE && activeArena.getPlayerIds().size() >= queueLimit) {
+            if (mode.isTimeTrial()) {
+                String runnerText = waitingService.formatRunnerCount(queueLimit);
+                send(player, ChatColor.RED + "That arena already has the maximum of "
+                        + ChatColor.AQUA + runnerText + ChatColor.RED + " warming up. Try again shortly.");
+            } else {
+                int maxRunners = arena.getMaxRunners();
+                send(player, ChatColor.RED + "That arena already has the maximum of "
+                        + ChatColor.AQUA + waitingService.formatRunnerCount(maxRunners) + ChatColor.RED
+                        + " (plus the Beast). Try again later.");
+            }
             return;
         }
 
@@ -95,14 +136,34 @@ final class ArenaQueueService {
             return;
         }
 
-        prepareWaitingLoadout(player, activeArena);
+        activeArena.setMode(mode);
 
-        send(player, ChatColor.GREEN + "Joined arena " + ChatColor.AQUA + arena.getName() + ChatColor.GREEN + ".");
-        if (preference != GameManager.RolePreference.ANY) {
+        prepareWaitingLoadout(player, activeArena, mode);
+
+        if (mode.isTimeTrial()) {
+            send(player, ChatColor.GREEN + "Joined time trial for " + ChatColor.AQUA + arena.getName() + ChatColor.GREEN + ".");
+            send(player, ChatColor.YELLOW + "Countdown begins shortly. Good luck!");
+        } else {
+            send(player, ChatColor.GREEN + "Joined arena " + ChatColor.AQUA + arena.getName() + ChatColor.GREEN + ".");
+        }
+        if (!mode.isTimeTrial() && preference != GameManager.RolePreference.ANY) {
             send(player, ChatColor.GOLD + "Preference set to " + formatPreference(preference) + ChatColor.GOLD + ".");
         }
 
         if (activeArena.isRunning()) {
+            if (mode.isTimeTrial() && activeArena.isMatchActive()) {
+                activeArena.addRunner(player.getUniqueId());
+                boolean restarted = timeTrials.restartRun(activeArena, player, false);
+                if (!restarted) {
+                    activeArena.removePlayer(player.getUniqueId());
+                } else {
+                    playerSupport.hideTimeTrialParticipant(player, activeArena);
+                    send(player, ChatColor.YELLOW + "Countdown started. Wait for GO before sprinting!");
+                }
+                statusService.notifyArenaStatus(activeArena);
+                return;
+            }
+
             if (!waitingService.teleportToWaiting(arena, player)) {
                 send(player, ChatColor.RED + "Waiting spawn is not configured correctly. Please notify an admin.");
             } else {
@@ -124,14 +185,6 @@ final class ArenaQueueService {
         return roleSelection.canChoosePreference(player) ? preference : GameManager.RolePreference.ANY;
     }
 
-    private boolean isQueueFull(ArenaDefinition arena, ActiveArena activeArena) {
-        int limit = waitingService.getQueueLimit(arena);
-        if (limit == Integer.MAX_VALUE) {
-            return false;
-        }
-        return activeArena.getPlayerIds().size() >= limit;
-    }
-
     private void handleExistingParticipant(Player player,
                                            ActiveArena activeArena,
                                            GameManager.RolePreference preference) {
@@ -140,25 +193,42 @@ final class ArenaQueueService {
         } else {
             send(player, ChatColor.YELLOW + "You are already in the queue for this arena.");
         }
-        if (roleSelection.canChoosePreference(player)) {
+        if (!activeArena.isTimeTrial() && roleSelection.canChoosePreference(player)) {
             playerSupport.givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
         } else {
             playerSupport.clearPreferenceSelectors(player);
         }
     }
 
-    private void prepareWaitingLoadout(Player player, ActiveArena activeArena) {
+    private void prepareWaitingLoadout(Player player, ActiveArena activeArena, GameModeType mode) {
         playerSupport.resetLoadout(player);
         if (!activeArena.isMatchActive()) {
             playerSupport.giveExitToken(player);
         }
-        if (roleSelection.canChoosePreference(player)) {
+        if (!mode.isTimeTrial() && roleSelection.canChoosePreference(player)) {
             playerSupport.givePreferenceSelectors(player, activeArena.getPreference(player.getUniqueId()));
         } else {
             playerSupport.clearPreferenceSelectors(player);
         }
     }
 
+    private boolean ensureModeCompatible(Player player, ActiveArena activeArena, GameModeType requested) {
+        GameModeType current = activeArena.getMode();
+        if (current == requested) {
+            return true;
+        }
+        if (activeArena.isRunning() || activeArena.isSelecting() || activeArena.isMatchActive()
+                || !activeArena.getPlayerIds().isEmpty()) {
+            if (requested.isTimeTrial()) {
+                send(player, ChatColor.RED + "That arena is preparing for a hunt. Try again when it is idle.");
+            } else {
+                send(player, ChatColor.RED + "That arena is currently set for time trials. Finish the practice run first.");
+            }
+            return false;
+        }
+        activeArena.setMode(requested);
+        return true;
+    }
     private String formatPreference(GameManager.RolePreference preference) {
         return switch (preference) {
             case RUNNER -> ChatColor.AQUA + "runner" + ChatColor.RESET;

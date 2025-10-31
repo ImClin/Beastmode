@@ -17,13 +17,16 @@ final class ArenaLifecycleService {
 
     private final ActiveArenaDirectory arenaDirectory;
     private final ArenaBarrierService barrierService;
+    private final PlayerSupportService playerSupport;
     private final Consumer<String> statusNotifier;
 
     ArenaLifecycleService(ActiveArenaDirectory arenaDirectory,
                           ArenaBarrierService barrierService,
+                          PlayerSupportService playerSupport,
                           Consumer<String> statusNotifier) {
         this.arenaDirectory = arenaDirectory;
         this.barrierService = barrierService;
+        this.playerSupport = playerSupport;
         this.statusNotifier = statusNotifier;
     }
 
@@ -81,6 +84,7 @@ final class ArenaLifecycleService {
         }
 
         activeArena.cancelTasks();
+        playerSupport.revealTimeTrialParticipants(activeArena);
         clearBeastEffects(activeArena);
         if (restoreWalls) {
             resetArenaState(activeArena);

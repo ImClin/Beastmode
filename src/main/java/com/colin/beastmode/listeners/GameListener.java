@@ -82,6 +82,16 @@ public class GameListener implements Listener {
                 gameManager.handlePreferenceItemUse(player, off);
                 return;
             }
+            if (hand == EquipmentSlot.HAND && gameManager.isTimeTrialRestartItem(main)) {
+                event.setCancelled(true);
+                gameManager.handleTimeTrialRestart(player);
+                return;
+            }
+            if (hand == EquipmentSlot.OFF_HAND && gameManager.isTimeTrialRestartItem(off)) {
+                event.setCancelled(true);
+                gameManager.handleTimeTrialRestart(player);
+                return;
+            }
         }
 
         boolean usingExitToken = false;

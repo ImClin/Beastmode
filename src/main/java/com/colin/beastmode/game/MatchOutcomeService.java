@@ -21,15 +21,18 @@ final class MatchOutcomeService {
     private final String defaultBeastName;
     private final PlayerSupportService playerSupport;
     private final PlayerTransitionService transitions;
+    private final TimeTrialService timeTrials;
 
     MatchOutcomeService(String prefix,
                         String defaultBeastName,
                         PlayerSupportService playerSupport,
-                        PlayerTransitionService transitions) {
+                        PlayerTransitionService transitions,
+                        TimeTrialService timeTrials) {
         this.prefix = Objects.requireNonNull(prefix, "prefix");
         this.defaultBeastName = Objects.requireNonNull(defaultBeastName, "defaultBeastName");
         this.playerSupport = Objects.requireNonNull(playerSupport, "playerSupport");
         this.transitions = Objects.requireNonNull(transitions, "transitions");
+        this.timeTrials = Objects.requireNonNull(timeTrials, "timeTrials");
     }
 
     void handleRunnerVictory(ActiveArena activeArena,
@@ -38,6 +41,11 @@ final class MatchOutcomeService {
                              Runnable notifyStatus,
                              Runnable cleanup) {
         if (activeArena == null) {
+            return;
+        }
+
+        if (activeArena.isTimeTrial()) {
+            handleTimeTrialFinish(activeArena, finisher, participantsSupplier, notifyStatus, cleanup);
             return;
         }
 
@@ -111,6 +119,67 @@ final class MatchOutcomeService {
             return true;
         }
         return false;
+    }
+
+    private void handleTimeTrialFinish(ActiveArena activeArena,
+                                       Player finisher,
+                                       Supplier<List<Player>> participantsSupplier,
+                                       Runnable notifyStatus,
+                                       Runnable cleanup) {
+        if (finisher == null) {
+            run(cleanup);
+            return;
+        }
+
+        TimeTrialService.TimeTrialResult result = timeTrials.completeRun(activeArena, finisher);
+        UUID finisherId = finisher.getUniqueId();
+        List<Player> participants = safeParticipants(participantsSupplier);
+        List<Player> others = new ArrayList<>();
+        for (Player participant : participants) {
+            if (participant == null) {
+                continue;
+            }
+            if (participant.getUniqueId().equals(finisherId)) {
+                continue;
+            }
+            others.add(participant);
+        }
+
+        String formatted = timeTrials.formatDuration(result.elapsedMillis());
+        String title = ChatColor.GREEN + "" + ChatColor.BOLD + "Time Trial Complete";
+        String subtitle = ChatColor.AQUA + formatted;
+        String broadcast = ChatColor.GOLD + finisher.getName() + ChatColor.YELLOW + " finished in "
+                + ChatColor.AQUA + formatted;
+        if (result.rank() > 0) {
+            broadcast += ChatColor.YELLOW + " (" + ChatColor.GOLD + "#" + result.rank() + ChatColor.YELLOW + ")";
+        }
+
+        finisher.sendTitle(title, subtitle, 10, 60, 10);
+        finisher.playSound(finisher.getLocation(), Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f);
+        finisher.removePotionEffect(PotionEffectType.SPEED);
+        finisher.removePotionEffect(PotionEffectType.FIRE_RESISTANCE);
+        playerSupport.removeTimeTrialRestartItem(finisher);
+        playerSupport.resetLoadout(finisher);
+        playerSupport.revealTimeTrialParticipant(finisher);
+        transitions.sendPlayerToSpawn(activeArena, finisher);
+
+        for (Player participant : others) {
+            send(participant, broadcast);
+        }
+
+        activeArena.removeRunner(finisherId);
+        activeArena.removePlayer(finisherId);
+
+        if (!activeArena.hasRunners()) {
+            activeArena.setMatchActive(false);
+            activeArena.setRunning(false);
+            playerSupport.revealTimeTrialParticipants(activeArena);
+            run(notifyStatus);
+            run(cleanup);
+            return;
+        }
+
+        run(notifyStatus);
     }
 
     private void handleBeastVictory(ActiveArena activeArena,

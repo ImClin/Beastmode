@@ -2,6 +2,7 @@ package com.colin.beastmode.game;
 
 import com.colin.beastmode.Beastmode;
 import com.colin.beastmode.storage.ArenaStorage;
+import com.colin.beastmode.storage.TimeTrialStorage;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
 
@@ -17,14 +18,17 @@ record GameServices(ActiveArenaDirectory arenaDirectory,
                     MatchCompletionService completionService,
                     MatchEliminationService eliminationService,
                     MatchOrchestrationService orchestration,
-                    ArenaQueueService queueService) {
+                    ArenaQueueService queueService,
+                    TimeTrialService timeTrials) {
 
     static GameServices create(Beastmode plugin,
                                ArenaStorage arenaStorage,
                                String prefix,
                                NamespacedKey exitTokenKey,
                                NamespacedKey preferenceKey,
+                               NamespacedKey restartTokenKey,
                                ItemStack exitTokenTemplate,
+                               ItemStack restartTokenTemplate,
                                int longEffectDurationTicks,
                                String defaultBeastName,
                                String vipPermission,
@@ -32,18 +36,20 @@ record GameServices(ActiveArenaDirectory arenaDirectory,
         ActiveArenaDirectory directory = new ActiveArenaDirectory();
         ArenaStatusService statusService = new ArenaStatusService();
         PlayerSupportService playerSupport = new PlayerSupportService(plugin, prefix, longEffectDurationTicks,
-            exitTokenKey, preferenceKey, exitTokenTemplate);
+            exitTokenKey, preferenceKey, restartTokenKey, exitTokenTemplate, restartTokenTemplate);
         ArenaWaitingService waitingService = new ArenaWaitingService(playerSupport, prefix);
         ArenaBarrierService barrierService = new ArenaBarrierService();
-        ArenaLifecycleService arenaLifecycle = new ArenaLifecycleService(directory, barrierService, statusService::notifyArenaName);
+    ArenaLifecycleService arenaLifecycle = new ArenaLifecycleService(directory, barrierService, playerSupport, statusService::notifyArenaName);
         CountdownService countdowns = new CountdownService(plugin);
         RoleSelectionService roleSelection = new RoleSelectionService(vipPermission, njogPermission);
         MatchSetupService matchSetup = new MatchSetupService(playerSupport, prefix);
         ArenaMessagingService messaging = new ArenaMessagingService(prefix, defaultBeastName);
         PlayerTransitionService transitions = new PlayerTransitionService(plugin, playerSupport);
-        MatchOutcomeService matchOutcome = new MatchOutcomeService(prefix, defaultBeastName, playerSupport, transitions);
+        TimeTrialStorage timeTrialStorage = new TimeTrialStorage(plugin);
+        TimeTrialService timeTrials = new TimeTrialService(plugin, timeTrialStorage, playerSupport, messaging, prefix);
+        MatchOutcomeService matchOutcome = new MatchOutcomeService(prefix, defaultBeastName, playerSupport, transitions, timeTrials);
         MatchFlowService matchFlow = new MatchFlowService(plugin, countdowns, barrierService, playerSupport,
-            messaging, prefix, longEffectDurationTicks);
+            messaging, prefix, longEffectDurationTicks, timeTrials);
         // Selection depends on waiting/lifecycle/messaging to sequence lobby → game transitions.
         MatchSelectionService selectionService = new MatchSelectionService(countdowns, roleSelection, matchSetup,
             messaging, matchFlow, waitingService, arenaLifecycle, statusService::notifyArenaStatus);
@@ -51,13 +57,13 @@ record GameServices(ActiveArenaDirectory arenaDirectory,
         ArenaDepartureService departureService = new ArenaDepartureService(prefix, playerSupport, transitions,
             waitingService, arenaLifecycle, matchOutcome, statusService::notifyArenaStatus);
         MatchCompletionService completionService = new MatchCompletionService(directory, departureService);
-        MatchEliminationService eliminationService = new MatchEliminationService(directory, playerSupport, transitions, departureService);
+    MatchEliminationService eliminationService = new MatchEliminationService(directory, playerSupport, transitions, departureService);
         MatchOrchestrationService orchestration = new MatchOrchestrationService(directory, arenaStorage, arenaLifecycle,
             waitingService, selectionService, departureService, statusService, prefix);
         ArenaQueueService queueService = new ArenaQueueService(arenaStorage, directory, playerSupport,
-            roleSelection, waitingService, orchestration, statusService, prefix);
+            roleSelection, waitingService, orchestration, statusService, timeTrials, prefix);
 
         return new GameServices(directory, statusService, playerSupport, roleSelection, preferenceService,
-            departureService, completionService, eliminationService, orchestration, queueService);
+            departureService, completionService, eliminationService, orchestration, queueService, timeTrials);
     }
 }

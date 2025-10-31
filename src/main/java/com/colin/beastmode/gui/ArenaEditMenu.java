@@ -338,7 +338,7 @@ public class ArenaEditMenu {
 
     private void handleReconfigure(Player player, ArenaDefinition arena) {
         player.closeInventory();
-        if (sessionManager.startSession(player, arena.getName())) {
+        if (sessionManager.startSession(player, arena.getName(), arena.getGameModeType())) {
             player.sendMessage(prefix + ChatColor.YELLOW + "Reconfigure the arena using the setup wizard.");
         }
     }

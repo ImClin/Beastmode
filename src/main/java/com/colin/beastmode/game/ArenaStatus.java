@@ -10,9 +10,10 @@ public final class ArenaStatus {
     private final boolean running;
     private final boolean selecting;
     private final boolean matchActive;
+    private final GameModeType mode;
 
     ArenaStatus(String arenaName, boolean available, boolean complete, int playerCount, int capacity,
-                boolean running, boolean selecting, boolean matchActive) {
+                boolean running, boolean selecting, boolean matchActive, GameModeType mode) {
         this.arenaName = arenaName;
         this.available = available;
         this.complete = complete;
@@ -21,10 +22,11 @@ public final class ArenaStatus {
         this.running = running;
         this.selecting = selecting;
         this.matchActive = matchActive;
+        this.mode = mode != null ? mode : GameModeType.HUNT;
     }
 
     static ArenaStatus unavailable(String arenaName) {
-        return new ArenaStatus(arenaName, false, false, 0, -1, false, false, false);
+        return new ArenaStatus(arenaName, false, false, 0, -1, false, false, false, GameModeType.HUNT);
     }
 
     public String getArenaName() {
@@ -65,5 +67,9 @@ public final class ArenaStatus {
 
     public boolean isBusy() {
         return running || selecting || matchActive;
+    }
+
+    public GameModeType getMode() {
+        return mode;
     }
 }

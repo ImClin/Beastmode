@@ -33,18 +33,34 @@ final class MatchSetupService {
                 .toList();
     }
 
-    boolean validateSpawns(List<Player> players, ArenaDefinition arena) {
-        if (arena != null && arena.getRunnerSpawn() != null && arena.getBeastSpawn() != null) {
+    boolean validateSpawns(List<Player> players, ArenaDefinition arena, GameModeType mode) {
+        if (arena == null) {
+            notifyMissingSpawns(players, ChatColor.RED + "Arena spawns are not configured.");
+            return false;
+        }
+
+        boolean hasRunner = arena.getRunnerSpawn() != null;
+        boolean hasBeast = arena.getBeastSpawn() != null;
+        boolean valid = mode.isTimeTrial() ? hasRunner : (hasRunner && hasBeast);
+        if (valid) {
             return true;
         }
-        if (players != null) {
-            for (Player player : players) {
-                if (player != null) {
-                    player.sendMessage(prefix + ChatColor.RED + "Arena spawns are not configured.");
-                }
+        String message = mode.isTimeTrial()
+                ? ChatColor.RED + "Runner spawn is not configured."
+                : ChatColor.RED + "Arena spawns are not configured.";
+        notifyMissingSpawns(players, message);
+        return false;
+    }
+
+    private void notifyMissingSpawns(List<Player> players, String message) {
+        if (players == null) {
+            return;
+        }
+        for (Player player : players) {
+            if (player != null) {
+                player.sendMessage(prefix + message);
             }
         }
-        return false;
     }
 
     void assignRoles(ActiveArena activeArena, List<Player> players, Player beast) {

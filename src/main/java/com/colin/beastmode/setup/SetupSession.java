@@ -1,5 +1,6 @@
 package com.colin.beastmode.setup;
 
+import com.colin.beastmode.game.GameModeType;
 import com.colin.beastmode.model.ArenaDefinition;
 import com.colin.beastmode.model.Cuboid;
 import org.bukkit.Location;
@@ -12,6 +13,7 @@ public class SetupSession {
     private final String arenaName;
     private SetupStage stage;
     private SetupMode mode;
+    private final GameModeType gameMode;
     private Location runnerWallPos1;
     private Location runnerWallPos2;
     private Location beastWallPos1;
@@ -26,9 +28,14 @@ public class SetupSession {
     private Integer maxRunners;
 
     public SetupSession(UUID playerId, String arenaName) {
+        this(playerId, arenaName, GameModeType.HUNT);
+    }
+
+    public SetupSession(UUID playerId, String arenaName, GameModeType mode) {
         this.playerId = playerId;
         this.arenaName = arenaName;
-        this.stage = SetupStage.RUNNER_WALL_POS1;
+        this.gameMode = mode != null ? mode : GameModeType.HUNT;
+        this.stage = this.gameMode.isTimeTrial() ? SetupStage.RUNNER_SPAWN : SetupStage.RUNNER_WALL_POS1;
         this.mode = SetupMode.CREATE;
     }
 
@@ -54,6 +61,10 @@ public class SetupSession {
 
     public void setMode(SetupMode mode) {
         this.mode = mode;
+    }
+
+    public GameModeType getGameMode() {
+        return gameMode;
     }
 
     public void setRunnerWallPos1(Location location) {
@@ -152,6 +163,10 @@ public class SetupSession {
         return maxRunners;
     }
 
+    public boolean isTimeTrial() {
+        return gameMode.isTimeTrial();
+    }
+
     public boolean hasRunnerWallSelection() {
         return runnerWallPos1 != null && runnerWallPos2 != null;
     }
@@ -168,7 +183,21 @@ public class SetupSession {
         if (!isComplete()) {
             throw new IllegalStateException("Setup is not complete");
         }
+        if (isTimeTrial()) {
+            return ArenaDefinition.builder(arenaName)
+                    .gameMode(gameMode)
+                    .finishButton(finishButton)
+                    .runnerSpawn(runnerSpawn)
+                    .runnerWallDelaySeconds(runnerWallDelaySeconds != null ? runnerWallDelaySeconds : 0)
+                    .beastReleaseDelaySeconds(beastReleaseDelaySeconds != null ? beastReleaseDelaySeconds : 0)
+                    .beastSpeedLevel(beastSpeedLevel != null ? beastSpeedLevel : 0)
+                    .minRunners(minRunners != null ? minRunners : 1)
+                    .maxRunners(maxRunners != null ? maxRunners : 0)
+                    .build();
+        }
+
         return ArenaDefinition.builder(arenaName)
+                .gameMode(gameMode)
                 .runnerWall(Cuboid.fromCorners(runnerWallPos1, runnerWallPos2))
                 .beastWall(Cuboid.fromCorners(beastWallPos1, beastWallPos2))
                 .finishButton(finishButton)
@@ -176,22 +205,26 @@ public class SetupSession {
                 .beastSpawn(beastSpawn)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
-        .beastSpeedLevel(beastSpeedLevel != null ? beastSpeedLevel : 1)
-        .minRunners(minRunners)
-        .maxRunners(maxRunners)
+                .beastSpeedLevel(beastSpeedLevel != null ? beastSpeedLevel : 1)
+                .minRunners(minRunners)
+                .maxRunners(maxRunners)
                 .build();
     }
 
     public boolean isComplete() {
+        if (isTimeTrial()) {
+            return runnerSpawn != null && hasFinishButtonSelection();
+        }
+
         return hasRunnerWallSelection()
                 && hasBeastWallSelection()
-        && hasFinishButtonSelection()
+                && hasFinishButtonSelection()
                 && runnerSpawn != null
                 && beastSpawn != null
                 && runnerWallDelaySeconds != null
-        && beastReleaseDelaySeconds != null
-        && beastSpeedLevel != null
-        && minRunners != null
-        && maxRunners != null;
+                && beastReleaseDelaySeconds != null
+                && beastSpeedLevel != null
+                && minRunners != null
+                && maxRunners != null;
     }
 }

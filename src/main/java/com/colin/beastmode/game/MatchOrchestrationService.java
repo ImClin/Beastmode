@@ -65,7 +65,7 @@ final class MatchOrchestrationService {
         }
 
         ArenaDefinition arena = activeArena.getArena();
-        if (!waitingService.sendPlayersToWaiting(arena, participants)) {
+        if (!waitingService.sendPlayersToWaiting(arena, participants, activeArena.getMode())) {
             activeArena.setRunning(false);
             arenaLifecycle.cleanupArena(key, activeArena);
             return;
@@ -121,6 +121,10 @@ final class MatchOrchestrationService {
     }
 
     ArenaStatus getArenaStatus(String arenaName) {
+        return getArenaStatus(arenaName, null);
+    }
+
+    ArenaStatus getArenaStatus(String arenaName, GameModeType desiredMode) {
         if (arenaName == null || arenaName.trim().isEmpty()) {
             return ArenaStatus.unavailable("");
         }
@@ -131,27 +135,30 @@ final class MatchOrchestrationService {
         }
 
         String key = arena.getName().toLowerCase(Locale.ENGLISH);
-    ActiveArena activeArena = arenaDirectory.get(key);
+        ActiveArena activeArena = arenaDirectory.get(key);
 
         int playerCount = 0;
         boolean running = false;
         boolean selecting = false;
         boolean matchActive = false;
+        GameModeType activeMode = GameModeType.HUNT;
 
         if (activeArena != null) {
             playerCount = arenaLifecycle.countActivePlayers(activeArena);
             running = activeArena.isRunning();
             selecting = activeArena.isSelecting();
             matchActive = activeArena.isMatchActive();
+            activeMode = activeArena.getMode();
         }
 
-        int capacity = waitingService.getQueueLimit(arena);
+        GameModeType referenceMode = desiredMode != null ? desiredMode : activeMode;
+        int capacity = waitingService.getQueueLimit(arena, referenceMode);
         if (capacity == Integer.MAX_VALUE) {
             capacity = -1;
         }
 
         return new ArenaStatus(arena.getName(), true, arena.isComplete(), playerCount, capacity,
-                running, selecting, matchActive);
+                running, selecting, matchActive, activeMode);
     }
 
     void notifyArenaStatus(ActiveArena activeArena) {

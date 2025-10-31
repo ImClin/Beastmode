@@ -53,6 +53,9 @@ final class ArenaDepartureService {
         playerSupport.restoreVitals(player);
         player.setGameMode(GameMode.ADVENTURE);
 
+        if (activeArena.isTimeTrial()) {
+            playerSupport.revealTimeTrialParticipant(player);
+        }
         activeArena.removePlayer(uuid);
         pendingSpawnTeleports.add(uuid);
         playerSupport.removeExitToken(player);
@@ -85,6 +88,9 @@ final class ArenaDepartureService {
 
         playerSupport.resetLoadout(player);
         player.setGameMode(GameMode.ADVENTURE);
+        if (activeArena.isTimeTrial()) {
+            playerSupport.revealTimeTrialParticipant(player);
+        }
         activeArena.removePlayer(uuid);
         playerSupport.removeExitToken(player);
         notifyStatus(activeArena);

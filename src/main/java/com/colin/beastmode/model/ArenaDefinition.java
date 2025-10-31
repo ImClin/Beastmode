@@ -1,5 +1,6 @@
 package com.colin.beastmode.model;
 
+import com.colin.beastmode.game.GameModeType;
 import org.bukkit.Location;
 import java.util.Objects;
 
@@ -18,6 +19,7 @@ public class ArenaDefinition {
     private final int minRunners;
     private final int maxRunners;
     private final int beastSpeedLevel;
+    private final GameModeType gameMode;
 
     private ArenaDefinition(Builder builder) {
         this.name = builder.name;
@@ -37,6 +39,7 @@ public class ArenaDefinition {
         }
         this.maxRunners = sanitizedMax;
         this.beastSpeedLevel = Math.max(builder.beastSpeedLevel, 0);
+        this.gameMode = builder.gameMode != null ? builder.gameMode : GameModeType.HUNT;
     }
 
     public String getName() {
@@ -61,6 +64,14 @@ public class ArenaDefinition {
 
     public Location getWaitingSpawn() {
         return waitingSpawn;
+    }
+
+    public GameModeType getGameModeType() {
+        return gameMode;
+    }
+
+    public boolean isTimeTrial() {
+        return gameMode.isTimeTrial();
     }
 
     public int getRunnerWallDelaySeconds() {
@@ -88,6 +99,10 @@ public class ArenaDefinition {
     }
 
     public boolean isComplete() {
+        if (isTimeTrial()) {
+            return (finishButton != null || finishRegion != null)
+                    && runnerSpawn != null;
+        }
         return runnerWall != null && beastWall != null && (finishButton != null || finishRegion != null)
                 && runnerSpawn != null && beastSpawn != null
                 && runnerWallDelaySeconds >= 0 && beastReleaseDelaySeconds >= 0
@@ -132,6 +147,7 @@ public class ArenaDefinition {
         private int minRunners = 1;
         private int maxRunners = 0;
     private int beastSpeedLevel = 1;
+    private GameModeType gameMode = GameModeType.HUNT;
 
         public Builder(String name) {
             this.name = name;
@@ -197,6 +213,11 @@ public class ArenaDefinition {
             return this;
         }
 
+        public Builder gameMode(GameModeType gameMode) {
+            this.gameMode = gameMode != null ? gameMode : GameModeType.HUNT;
+            return this;
+        }
+
         public ArenaDefinition build() {
             return new ArenaDefinition(this);
         }
@@ -209,6 +230,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(location != null ? location.clone() : null)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -226,6 +248,7 @@ public class ArenaDefinition {
                 .runnerSpawn(location != null ? location.clone() : null)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -243,6 +266,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(location != null ? location.clone() : null)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -260,6 +284,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -277,6 +302,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
         .beastSpeedLevel(beastSpeedLevel)
@@ -294,6 +320,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(seconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -311,6 +338,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(seconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -328,6 +356,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -345,6 +374,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -362,6 +392,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(beastSpeedLevel)
@@ -379,6 +410,7 @@ public class ArenaDefinition {
                 .runnerSpawn(runnerSpawn)
                 .beastSpawn(beastSpawn)
                 .waitingSpawn(waitingSpawn)
+                .gameMode(gameMode)
                 .runnerWallDelaySeconds(runnerWallDelaySeconds)
                 .beastReleaseDelaySeconds(beastReleaseDelaySeconds)
                 .beastSpeedLevel(level)

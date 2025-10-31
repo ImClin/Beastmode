@@ -28,6 +28,7 @@ public class GameManager {
     private final MatchCompletionService completionService;
     private final MatchEliminationService eliminationService;
     private final ArenaQueueService queueService;
+    private final TimeTrialService timeTrials;
     static final String MSG_ARENA_NOT_FOUND = "Arena %s does not exist.";
     static final String MSG_ARENA_INCOMPLETE = "Arena %s is not fully configured yet.";
     private static final String PERM_PREFERENCE_VIP = "beastmode.preference.vip";
@@ -36,6 +37,7 @@ public class GameManager {
     static final int EXIT_TOKEN_SLOT = 8;
     static final int PREFERENCE_BEAST_SLOT = 0;
     static final int PREFERENCE_RUNNER_SLOT = 1;
+    static final int TIME_TRIAL_RESTART_SLOT = 0;
     private static final int LONG_EFFECT_DURATION_TICKS = 20 * 600;
 
     public enum RolePreference {
@@ -48,21 +50,24 @@ public class GameManager {
         String prefix = plugin.getConfig().getString("messages.prefix", "[Beastmode] ");
         NamespacedKey exitTokenKey = new NamespacedKey(plugin, "exit_token");
         NamespacedKey preferenceKey = new NamespacedKey(plugin, "preference_selector");
+        NamespacedKey restartKey = new NamespacedKey(plugin, "time_trial_restart");
         ItemStack exitTokenTemplate = createExitToken(exitTokenKey);
+        ItemStack restartTokenTemplate = createRestartToken(restartKey);
         GameServices services = GameServices.create(plugin, arenaStorage, prefix, exitTokenKey,
-            preferenceKey, exitTokenTemplate, LONG_EFFECT_DURATION_TICKS, DEFAULT_BEAST_NAME,
-            PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
+                preferenceKey, restartKey, exitTokenTemplate, restartTokenTemplate, LONG_EFFECT_DURATION_TICKS,
+                DEFAULT_BEAST_NAME, PERM_PREFERENCE_VIP, PERM_PREFERENCE_NJOG);
 
-    this.arenaDirectory = services.arenaDirectory();
-    this.statusService = services.statusService();
-    this.playerSupport = services.playerSupport();
-    this.roleSelection = services.roleSelection();
-    this.preferenceService = services.preferenceService();
-    this.departureService = services.departureService();
-    this.completionService = services.completionService();
-    this.eliminationService = services.eliminationService();
-    this.orchestration = services.orchestration();
-    this.queueService = services.queueService();
+        this.arenaDirectory = services.arenaDirectory();
+        this.statusService = services.statusService();
+        this.playerSupport = services.playerSupport();
+        this.roleSelection = services.roleSelection();
+        this.preferenceService = services.preferenceService();
+        this.departureService = services.departureService();
+        this.completionService = services.completionService();
+        this.eliminationService = services.eliminationService();
+        this.orchestration = services.orchestration();
+        this.queueService = services.queueService();
+        this.timeTrials = services.timeTrials();
     }
 
     public void registerStatusListener(Consumer<String> listener) {
@@ -82,7 +87,11 @@ public class GameManager {
     }
 
     public void joinArena(Player player, String arenaName, RolePreference preference) {
-        queueService.join(player, arenaName, preference);
+        queueService.join(player, arenaName, GameModeType.HUNT, preference);
+    }
+
+    public void joinTimeTrial(Player player, String arenaName) {
+        queueService.joinTimeTrial(player, arenaName);
     }
 
     public void handlePlayerMove(Player player, Location from, Location to) {
@@ -188,6 +197,14 @@ public class GameManager {
         return orchestration.getArenaStatus(arenaName);
     }
 
+    public TimeTrialService getTimeTrials() {
+        return timeTrials;
+    }
+
+    public ArenaStatus getArenaStatus(String arenaName, GameModeType mode) {
+        return orchestration.getArenaStatus(arenaName, mode);
+    }
+
     void startMatch(String key, ActiveArena activeArena) {
         orchestration.startMatch(key, activeArena);
     }
@@ -210,6 +227,22 @@ public class GameManager {
         return stack;
     }
 
+    private ItemStack createRestartToken(NamespacedKey restartKey) {
+        ItemStack stack = new ItemStack(Material.CLOCK);
+        var meta = stack.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(ChatColor.AQUA + "Restart Run");
+            meta.setLore(List.of(
+                    ChatColor.GRAY + "Right-click to start over.",
+                    ChatColor.DARK_GRAY + "Only works in time trials."));
+            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
+            meta.setUnbreakable(true);
+            meta.getPersistentDataContainer().set(restartKey, PersistentDataType.BYTE, (byte) 1);
+            stack.setItemMeta(meta);
+        }
+        return stack;
+    }
+
     public boolean isExitToken(ItemStack stack) {
         return playerSupport.isExitToken(stack);
     }
@@ -219,11 +252,30 @@ public class GameManager {
     }
 
     public boolean isManagedItem(ItemStack stack) {
-        return playerSupport.isExitToken(stack) || playerSupport.isPreferenceSelector(stack);
+        return playerSupport.isExitToken(stack)
+                || playerSupport.isPreferenceSelector(stack)
+                || playerSupport.isTimeTrialRestartItem(stack);
     }
 
     public void handlePreferenceItemUse(Player player, ItemStack stack) {
         preferenceService.handlePreferenceItemUse(player, stack);
+    }
+
+    public boolean isTimeTrialRestartItem(ItemStack stack) {
+        return playerSupport.isTimeTrialRestartItem(stack);
+    }
+
+    public void handleTimeTrialRestart(Player player) {
+        if (player == null) {
+            return;
+        }
+
+        ActiveArenaContext context = resolveActiveArena(player.getUniqueId());
+        if (context == null) {
+            return;
+        }
+
+        timeTrials.restartRun(context.arena(), player);
     }
 
     private record ActiveArenaContext(String key, ActiveArena arena) {
