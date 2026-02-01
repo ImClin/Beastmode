@@ -88,6 +88,8 @@ final class PlayerSupportService {
             return;
         }
 
+        clearNegativeEffects(player);
+
         var attribute = player.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH);
         double maxHealth = attribute != null ? attribute.getValue() : player.getHealthScale();
         if (Double.isNaN(maxHealth) || maxHealth <= 0) {

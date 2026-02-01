@@ -138,7 +138,7 @@ final class ArenaMessagingService {
         String name = beast != null ? beast.getName() : defaultBeastName;
         for (Player player : players) {
             String title = ChatColor.DARK_RED + "" + ChatColor.BOLD + name;
-            String subtitle = ChatColor.GOLD + "" + ChatColor.BOLD + "is los!";
+            String subtitle = ChatColor.GOLD + "" + ChatColor.BOLD + "has been unleashed!";
             player.sendTitle(title, subtitle, 0, 40, 10);
             player.playSound(player.getLocation(), Sound.ENTITY_WITHER_SPAWN, 1.0f, 1.0f);
         }

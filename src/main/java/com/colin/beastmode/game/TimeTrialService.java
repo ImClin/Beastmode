@@ -104,11 +104,12 @@ public final class TimeTrialService {
         cancelCountdown(uuid);
         activeArena.removeTimeTrialStart(uuid);
 
+        playerSupport.resetLoadout(runner);
+        playerSupport.clearNegativeEffects(runner);
+        playerSupport.restoreVitals(runner);
         runner.teleport(activeArena.getArena().getRunnerSpawn().clone());
         runner.setVelocity(new Vector(0, 0, 0));
         runner.setFallDistance(0f);
-        playerSupport.resetLoadout(runner);
-        playerSupport.restoreVitals(runner);
         playerSupport.giveTimeTrialRestartItem(runner);
         if (showRestartMessage) {
             runner.sendMessage(prefix + ChatColor.YELLOW + "Run restarted! Countdown begins.");
