@@ -4,7 +4,7 @@ Beastmode is a Spigot/Paper mini-game plugin focused on a hunter-versus-runner e
 
 ## Features
 - Queue-based arena management with configurable runner limits.
-- Comprehensive arena setup workflow (walls, spawns, delays, finish button).
+- Full arena setup (walls, spawns, delays, finish button).
 - Inventory-driven arena editing GUI with guarded placement slots.
 - Support for Beastmode join signs and exit tokens that gracefully handle edge cases.
 
@@ -46,4 +46,4 @@ Players granted a preference permission receive red (Beast) and green (Runner) w
 - Use `gradlew.bat runServer` to start a local Paper server (configured for 1.21) for testing.
 - Build artifacts, IDE metadata, and cache directories are ignored via `.gitignore`.
 
-Contributions and issue reports are welcome—feel free to open a pull request or ticket on GitHub.
+PRs and issues welcome on GitHub.
